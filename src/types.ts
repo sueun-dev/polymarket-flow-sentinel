@@ -357,6 +357,7 @@ export interface PolygonClientLike {
 }
 
 export interface PolymarketDataClientLike {
+  getCanonicalProfileWallet(wallet: string): Promise<string | null>;
   getFirstActivity(wallet: string): Promise<PolymarketActivityRow | null>;
   getFirstTrade(wallet: string): Promise<PolymarketActivityRow | null>;
   getTradeActivitySince(wallet: string, startTimestamp: number): Promise<PolymarketActivityRow[]>;

@@ -2,6 +2,8 @@ import { isRecord, readNumber, readOptionalNumber, readOptionalString, readStrin
 
 import type { ActivityQuery, FetchLike, PolymarketActivityRow } from "./types.js";
 
+const GAMMA_API_BASE_URL = "https://gamma-api.polymarket.com";
+
 interface PolymarketDataClientOptions {
   baseUrl: string;
   timeoutMs: number;
@@ -36,6 +38,33 @@ async function fetchJson(url: URL, timeoutMs: number, fetchImpl: FetchLike): Pro
         "user-agent": "polymarket-flow-sentinel/1.0.0"
       }
     });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status} for ${url.toString()}`);
+    }
+
+    return (await response.json()) as unknown;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function fetchOptionalJson(url: URL, timeoutMs: number, fetchImpl: FetchLike): Promise<unknown | null> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetchImpl(url, {
+      signal: controller.signal,
+      headers: {
+        accept: "application/json",
+        "user-agent": "polymarket-flow-sentinel/1.0.0"
+      }
+    });
+
+    if (response.status === 404) {
+      return null;
+    }
 
     if (!response.ok) {
       throw new Error(`HTTP ${response.status} for ${url.toString()}`);
@@ -120,6 +149,7 @@ export class PolymarketDataClient {
   private readonly activityPageSize: number;
   private readonly activityPageCount: number;
   private readonly fetchImpl: FetchLike;
+  private readonly profileWalletCache = new Map<string, string | null>();
 
   constructor({
     baseUrl,
@@ -133,6 +163,33 @@ export class PolymarketDataClient {
     this.activityPageSize = Math.min(activityPageSize, 500);
     this.activityPageCount = activityPageCount;
     this.fetchImpl = fetchImpl;
+  }
+
+  async getCanonicalProfileWallet(wallet: string): Promise<string | null> {
+    const normalizedWallet = normalizeWallet(wallet);
+    const cached = this.profileWalletCache.get(normalizedWallet);
+
+    if (cached !== undefined) {
+      return cached;
+    }
+
+    const url = buildUrl(GAMMA_API_BASE_URL, "/public-profile", {
+      address: normalizedWallet
+    });
+    const payload = await fetchOptionalJson(url, this.timeoutMs, this.fetchImpl);
+
+    if (!isRecord(payload)) {
+      this.profileWalletCache.set(normalizedWallet, null);
+      return null;
+    }
+
+    const proxyWallet = normalizeWallet(readOptionalString(payload["proxyWallet"], "publicProfile.proxyWallet"));
+    const canonicalWallet = proxyWallet || null;
+    this.profileWalletCache.set(normalizedWallet, canonicalWallet);
+    if (canonicalWallet) {
+      this.profileWalletCache.set(canonicalWallet, canonicalWallet);
+    }
+    return canonicalWallet;
   }
 
   async getActivity({
