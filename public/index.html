@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Polymarket Flow Sentinel</title>
+    <meta
+      name="description"
+      content="Real-time intelligence for newly funded Polygon wallets before their first Polymarket bet."
+    />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow">Polymarket Flow Sentinel</p>
+          <h1>Track fresh Polygon funding all the way to a wallet's first Polymarket bet.</h1>
+          <p class="hero-text">
+            Flow Sentinel watches large Polygon funding into wallets with no prior Polymarket
+            footprint, then follows approval signals, first use, and the exact first market bet.
+          </p>
+        </div>
+        <section class="hero-panel">
+          <div class="live-pill">
+            <span class="live-dot" id="live-dot"></span>
+            <span id="live-label">Connecting</span>
+          </div>
+          <div class="hero-actions">
+            <button id="scan-button" class="primary-button" type="button">Scan Now</button>
+            <button id="toggle-button" class="secondary-button" type="button">Pause Monitor</button>
+          </div>
+          <dl class="mini-stats">
+            <div>
+              <dt>Funding Threshold</dt>
+              <dd id="threshold-value">$0</dd>
+            </div>
+            <div>
+              <dt>Poll Rate</dt>
+              <dd id="interval-value">-</dd>
+            </div>
+            <div>
+              <dt>Chain Lag</dt>
+              <dd id="chain-value">-</dd>
+            </div>
+            <div>
+              <dt>Webhook</dt>
+              <dd id="webhook-value">-</dd>
+            </div>
+          </dl>
+        </section>
+      </header>
+
+      <main class="dashboard-grid">
+        <section class="summary-grid" aria-label="Summary metrics">
+          <article class="summary-card">
+            <p class="summary-label">Monitor State</p>
+            <h2 id="monitor-state">-</h2>
+            <p id="monitor-meta" class="summary-meta">Waiting for data.</p>
+          </article>
+          <article class="summary-card">
+            <p class="summary-label">Tracked Wallets</p>
+            <h2 id="tracked-wallets">0</h2>
+            <p class="summary-meta">Large fresh funding candidates under surveillance.</p>
+          </article>
+          <article class="summary-card">
+            <p class="summary-label">First Use Hits</p>
+            <h2 id="first-use-hits">0</h2>
+            <p class="summary-meta">Wallets that have started touching Polymarket.</p>
+          </article>
+          <article class="summary-card accent-card">
+            <p class="summary-label">First Bet Hits</p>
+            <h2 id="first-trade-hits">0</h2>
+            <p id="last-alert" class="summary-meta">No alerts yet.</p>
+          </article>
+        </section>
+
+        <section class="panel" aria-labelledby="status-heading">
+          <div class="panel-heading">
+            <h2 id="status-heading">Runtime Status</h2>
+            <p>RPC sync, processing range, and most recent polling result.</p>
+          </div>
+          <div class="status-grid" id="status-grid"></div>
+        </section>
+
+        <section class="panel" aria-labelledby="watchlist-heading">
+          <div class="panel-heading">
+            <h2 id="watchlist-heading">Tracked Wallets</h2>
+            <p>Each card follows a wallet from funding to approval and into its first trade.</p>
+          </div>
+          <div id="watchlist-list" class="watchlist-list"></div>
+        </section>
+
+        <section class="panel alerts-panel" aria-labelledby="alerts-heading">
+          <div class="panel-heading">
+            <h2 id="alerts-heading">Recent Lifecycle Alerts</h2>
+            <p>Funding, first-use, and first-bet events appear here in real time.</p>
+          </div>
+          <div id="alerts-list" class="alerts-list"></div>
+        </section>
+      </main>
+    </div>
+
+    <template id="status-item-template">
+      <div class="status-item">
+        <p class="status-label"></p>
+        <p class="status-value"></p>
+      </div>
+    </template>
+
+    <template id="watch-card-template">
+      <article class="watch-card">
+        <div class="watch-header">
+          <div>
+            <p class="watch-status"></p>
+            <h3 class="watch-wallet"></h3>
+          </div>
+          <p class="watch-funded"></p>
+        </div>
+        <dl class="watch-details"></dl>
+        <div class="watch-links"></div>
+      </article>
+    </template>
+
+    <template id="alert-card-template">
+      <article class="alert-card">
+        <div class="alert-header">
+          <div>
+            <p class="alert-eyebrow"></p>
+            <h3 class="alert-title"></h3>
+          </div>
+          <p class="alert-amount"></p>
+        </div>
+        <dl class="alert-details"></dl>
+        <div class="alert-links"></div>
+      </article>
+    </template>
+
+    <script type="module" src="/dashboard-client.js"></script>
+  </body>
+</html>

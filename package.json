@@ -1,0 +1,16 @@
+{
+  "name": "polymarket-flow-sentinel",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Real-time intelligence for newly funded Polygon wallets before their first Polymarket bet.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/dashboard-server.js",
+    "track": "node src/monitor-cli.js",
+    "track:once": "node src/monitor-cli.js --once",
+    "test": "node --test"
+  }
+}
