@@ -59,6 +59,12 @@ async function registerFunding(
   const existing = dependencies.stateStore.getTrackedWallet(wallet);
 
   if (!existing) {
+    const canonicalProfileWallet = await dependencies.polymarketClient.getCanonicalProfileWallet(wallet);
+
+    if (canonicalProfileWallet && normalizeAddress(canonicalProfileWallet) !== normalizeAddress(wallet)) {
+      return { tracked: false, alert: null };
+    }
+
     const firstActivity = await dependencies.polymarketClient.getFirstActivity(wallet);
 
     if (firstActivity && firstActivity.timestamp < fundingTimestamp) {

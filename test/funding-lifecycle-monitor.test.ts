@@ -7,7 +7,7 @@ import test from "node:test";
 import { FundingLifecycleMonitor } from "../src/funding-lifecycle-monitor.js";
 import { JsonMonitorStateStore } from "../src/json-state-store.js";
 import { POLYMARKET_CONTRACTS } from "../src/polymarket-address-book.js";
-import { getTradeUsdSize } from "../src/polymarket-data-client.js";
+import { getTradeUsdSize, PolymarketDataClient } from "../src/polymarket-data-client.js";
 import { POLYGON_FUNDING_ASSETS } from "../src/polygon-funding-assets.js";
 import { decodeErc20TransferLog } from "../src/polygon-rpc-client.js";
 
@@ -87,6 +87,9 @@ function createPolymarketClientStub(
   overrides: Partial<PolymarketDataClientLike> = {}
 ): PolymarketDataClientLike {
   return {
+    async getCanonicalProfileWallet() {
+      return null;
+    },
     async getFirstActivity() {
       return null;
     },
@@ -153,6 +156,79 @@ test("decodeErc20TransferLog decodes addresses, amount, and position", () => {
     blockNumber: 10,
     logIndex: 3
   });
+});
+
+test("PolymarketDataClient reads canonical proxy wallets from public profile", async () => {
+  const requestedUrls: string[] = [];
+  const client = new PolymarketDataClient({
+    baseUrl: "https://data-api.polymarket.com",
+    timeoutMs: 1_000,
+    activityPageSize: 50,
+    activityPageCount: 2,
+    fetchImpl: async (input) => {
+      const url = String(input);
+      requestedUrls.push(url);
+
+      if (url.startsWith("https://gamma-api.polymarket.com/public-profile")) {
+        return new Response(
+          JSON.stringify({
+            proxyWallet: "0x2222222222222222222222222222222222222222"
+          }),
+          {
+            status: 200,
+            headers: {
+              "content-type": "application/json"
+            }
+          }
+        );
+      }
+
+      return new Response("[]", {
+        status: 200,
+        headers: {
+          "content-type": "application/json"
+        }
+      });
+    }
+  });
+
+  const canonicalWallet = await client.getCanonicalProfileWallet("0x1111111111111111111111111111111111111111");
+
+  assert.equal(canonicalWallet, "0x2222222222222222222222222222222222222222");
+  assert.equal(requestedUrls.length, 1);
+  assert.match(requestedUrls[0] ?? "", /^https:\/\/gamma-api\.polymarket\.com\/public-profile\?/);
+});
+
+test("PolymarketDataClient returns null when public profile is missing", async () => {
+  const requestedUrls: string[] = [];
+  const client = new PolymarketDataClient({
+    baseUrl: "https://data-api.polymarket.com",
+    timeoutMs: 1_000,
+    activityPageSize: 50,
+    activityPageCount: 2,
+    fetchImpl: async (input) => {
+      const url = String(input);
+      requestedUrls.push(url);
+
+      if (url.startsWith("https://gamma-api.polymarket.com/public-profile")) {
+        return new Response(null, {
+          status: 404
+        });
+      }
+
+      return new Response("[]", {
+        status: 200,
+        headers: {
+          "content-type": "application/json"
+        }
+      });
+    }
+  });
+
+  const canonicalWallet = await client.getCanonicalProfileWallet("0x3333333333333333333333333333333333333333");
+
+  assert.equal(canonicalWallet, null);
+  assert.equal(requestedUrls.length, 1);
 });
 
 test("FundingLifecycleMonitor bootstraps to the latest block in skip mode", async () => {
@@ -280,6 +356,62 @@ test("FundingLifecycleMonitor records funding, first use, and first trade", asyn
   assert.equal(trackedWallet.firstUse?.kind, "USDC approval to CTF");
   assert.equal(trackedWallet.firstTrade?.usdSize, 12_500);
   assert.equal(trackedWallet.status, "first-trade");
+
+  await fs.unlink(filePath);
+});
+
+test("FundingLifecycleMonitor ignores owner addresses that resolve to a different Polymarket proxy wallet", async () => {
+  const filePath = path.join(os.tmpdir(), `polymarket-flow-sentinel-owner-skip-${process.pid}-${Date.now()}.json`);
+  const stateStore = new JsonMonitorStateStore(filePath, 100, 100, 100);
+  const fundedOwnerWallet = "0x2222222222222222222222222222222222222222";
+  const proxyWallet = "0x3333333333333333333333333333333333333333";
+  const monitor = new FundingLifecycleMonitor({
+    polygonClient: createPolygonClientStub({
+      async getBlockNumber() {
+        return 10;
+      },
+      async getErc20TransferLogs({ address }) {
+        if (address === POLYMARKET_CONTRACTS.usdc) {
+          return [
+            {
+              type: "transfer",
+              from: "0x1111111111111111111111111111111111111111",
+              to: fundedOwnerWallet,
+              valueRaw: 60_000_000_000n,
+              value: 60_000,
+              transactionHash: "0xfund",
+              blockNumber: 8,
+              logIndex: 1
+            }
+          ];
+        }
+
+        return [];
+      },
+      async getBlockTimestamp(blockNumber: number) {
+        return 1_000 + blockNumber;
+      }
+    }),
+    polymarketClient: createPolymarketClientStub({
+      async getCanonicalProfileWallet(wallet: string) {
+        return wallet === fundedOwnerWallet ? proxyWallet : null;
+      }
+    }),
+    priceClient: createPriceClientStub(),
+    stateStore,
+    config: createTestConfig({
+      bootstrapMode: "scan",
+      startupLookbackBlocks: 5
+    }),
+    logger: createLogger()
+  });
+
+  await monitor.initialize();
+  const result = await monitor.runOnce();
+
+  assert.equal(result.alerts.length, 0);
+  assert.equal(result.newTrackedWallets, 0);
+  assert.equal(stateStore.getTrackedWallet(fundedOwnerWallet), null);
 
   await fs.unlink(filePath);
 });
