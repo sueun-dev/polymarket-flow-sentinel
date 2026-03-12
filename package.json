@@ -8,9 +8,16 @@
     "node": ">=20"
   },
   "scripts": {
-    "start": "node src/dashboard-server.js",
-    "track": "node src/monitor-cli.js",
-    "track:once": "node src/monitor-cli.js --once",
-    "test": "node --test"
+    "build:client": "tsc -p tsconfig.client.json",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.client.json --noEmit",
+    "start": "npm run build:client && tsx src/dashboard-server.ts",
+    "track": "npm run build:client && tsx src/monitor-cli.ts",
+    "track:once": "npm run build:client && tsx src/monitor-cli.ts --once",
+    "test": "npm run typecheck && tsx --test test/**/*.test.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
   }
 }

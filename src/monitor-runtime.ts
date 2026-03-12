@@ -1,32 +1,61 @@
 import { EventEmitter } from "node:events";
 
-function nowIso() {
+import type {
+  FailedPollSummary,
+  LoggerLike,
+  MonitorConfig,
+  MonitorLastResult,
+  MonitorRunResult,
+  MonitorSnapshot,
+  MonitorStateStoreLike,
+  PublishedMonitorAlert,
+  SuccessfulPollSummary
+} from "./types.js";
+
+interface RuntimeMonitor {
+  initialize(): Promise<void>;
+  runOnce(): Promise<MonitorRunResult>;
+}
+
+interface MonitorRuntimeOptions {
+  monitor: RuntimeMonitor;
+  stateStore: MonitorStateStoreLike;
+  config: MonitorConfig;
+  logger?: LoggerLike;
+}
+
+function nowIso(): string {
   return new Date().toISOString();
 }
 
 export class MonitorRuntime extends EventEmitter {
-  constructor({ monitor, stateStore, config, logger = console }) {
+  private readonly monitor: RuntimeMonitor;
+  private readonly stateStore: MonitorStateStoreLike;
+  private readonly config: MonitorConfig;
+  private readonly logger: LoggerLike;
+  private running = false;
+  private polling = false;
+  private lastPollAt: string | null = null;
+  private lastSuccessfulPollAt: string | null = null;
+  private lastError: string | null = null;
+  private lastResult: MonitorLastResult = null;
+  private timer: NodeJS.Timeout | null = null;
+  private currentPoll: Promise<MonitorRunResult> | null = null;
+
+  constructor({ monitor, stateStore, config, logger = console as LoggerLike }: MonitorRuntimeOptions) {
     super();
     this.monitor = monitor;
     this.stateStore = stateStore;
     this.config = config;
     this.logger = logger;
-    this.running = false;
-    this.polling = false;
-    this.lastPollAt = null;
-    this.lastSuccessfulPollAt = null;
-    this.lastError = null;
-    this.lastResult = null;
-    this.timer = null;
-    this.currentPoll = null;
   }
 
-  async initialize() {
+  async initialize(): Promise<void> {
     await this.monitor.initialize();
     this.emitSnapshot();
   }
 
-  start() {
+  start(): void {
     if (this.running) {
       return;
     }
@@ -36,7 +65,7 @@ export class MonitorRuntime extends EventEmitter {
     void this.scanNow("startup").catch(() => {});
   }
 
-  stop() {
+  stop(): void {
     this.running = false;
 
     if (this.timer) {
@@ -47,7 +76,7 @@ export class MonitorRuntime extends EventEmitter {
     this.emitSnapshot();
   }
 
-  async scanNow(reason = "manual") {
+  async scanNow(reason = "manual"): Promise<MonitorRunResult> {
     if (this.currentPoll) {
       return this.currentPoll;
     }
@@ -63,7 +92,7 @@ export class MonitorRuntime extends EventEmitter {
     return this.currentPoll;
   }
 
-  async runPoll(reason) {
+  private async runPoll(reason: string): Promise<MonitorRunResult> {
     this.polling = true;
     this.lastPollAt = nowIso();
     this.emitSnapshot();
@@ -83,7 +112,7 @@ export class MonitorRuntime extends EventEmitter {
         newTrackedWallets: result.newTrackedWallets,
         checkedWallets: result.checkedWallets,
         bootstrapped: result.bootstrapped
-      };
+      } satisfies SuccessfulPollSummary;
 
       for (const alert of result.alerts) {
         this.emit("alert", alert);
@@ -91,13 +120,13 @@ export class MonitorRuntime extends EventEmitter {
 
       this.emitSnapshot();
       return result;
-    } catch (error) {
+    } catch (error: unknown) {
       this.lastError = error instanceof Error ? error.message : String(error);
       this.lastResult = {
         reason,
         completedAt: nowIso(),
         error: this.lastError
-      };
+      } satisfies FailedPollSummary;
       this.logger.error(`Runtime poll failed: ${this.lastError}`);
       this.emitSnapshot();
       throw error;
@@ -107,7 +136,7 @@ export class MonitorRuntime extends EventEmitter {
     }
   }
 
-  scheduleNextPoll() {
+  private scheduleNextPoll(): void {
     if (!this.running) {
       return;
     }
@@ -121,7 +150,7 @@ export class MonitorRuntime extends EventEmitter {
     }, this.config.pollIntervalMs);
   }
 
-  getSnapshot() {
+  getSnapshot(): MonitorSnapshot {
     const recentAlerts = this.stateStore.getRecentAlerts(this.config.maxRecentAlerts);
     const monitorStatus = this.stateStore.getMonitorStatus();
     const walletStats = this.stateStore.getTrackedWalletStats();
@@ -142,7 +171,7 @@ export class MonitorRuntime extends EventEmitter {
         lastSuccessfulPollAt: this.lastSuccessfulPollAt,
         lastError: this.lastError,
         lastResult: this.lastResult,
-        lastChainSync: monitorStatus.lastChainSync ?? null
+        lastChainSync: monitorStatus.lastChainSync
       },
       stats: {
         trackedWalletCount: walletStats.trackedWalletCount,
@@ -156,7 +185,13 @@ export class MonitorRuntime extends EventEmitter {
     };
   }
 
-  emitSnapshot() {
+  private emitSnapshot(): void {
     this.emit("snapshot", this.getSnapshot());
+  }
+
+  override emit(eventName: "snapshot", snapshot: MonitorSnapshot): boolean;
+  override emit(eventName: "alert", alert: PublishedMonitorAlert): boolean;
+  override emit(eventName: string | symbol, ...args: unknown[]): boolean {
+    return super.emit(eventName, ...args);
   }
 }

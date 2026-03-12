@@ -1,31 +1,31 @@
-function shortWallet(wallet) {
-  if (!wallet || wallet.length < 10) {
+import type { FetchLike, PendingMonitorAlert, PublishedMonitorAlert } from "./types.js";
+
+function shortWallet(wallet: string): string {
+  if (wallet.length < 10) {
     return wallet;
   }
 
   return `${wallet.slice(0, 6)}...${wallet.slice(-4)}`;
 }
 
-export function formatUsd(amount) {
+export function formatUsd(amount: number): string {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
     maximumFractionDigits: 2
-  }).format(amount ?? 0);
+  }).format(amount);
 }
 
-export function formatMonitorAlertMessage(alert) {
+export function formatMonitorAlertMessage(alert: PendingMonitorAlert): string {
   if (alert.stage === "funding") {
     return [
       `[FRESH WALLET FUNDED] ${formatUsd(alert.amountUsd)}`,
       `Wallet: ${shortWallet(alert.wallet)}`,
-      `Wallet type: ${alert.walletKind ?? "Unknown"}`,
-      `Asset: ${alert.amountToken?.toLocaleString?.() ?? alert.amountToken ?? "-"} ${alert.assetSymbol ?? ""}`.trim(),
+      `Wallet type: ${alert.walletKind}`,
+      `Asset: ${alert.amountToken.toLocaleString()} ${alert.assetSymbol}`.trim(),
       `Source: ${shortWallet(alert.from)}`,
-      alert.transactionHash ? `Tx: https://polygonscan.com/tx/${alert.transactionHash}` : null
-    ]
-      .filter(Boolean)
-      .join("\n");
+      `Tx: https://polygonscan.com/tx/${alert.transactionHash}`
+    ].join("\n");
   }
 
   if (alert.stage === "first-use") {
@@ -35,25 +35,27 @@ export function formatMonitorAlertMessage(alert) {
       `Funding tracked: ${formatUsd(alert.fundedUsd)}`,
       alert.transactionHash ? `Tx: https://polygonscan.com/tx/${alert.transactionHash}` : null
     ]
-      .filter(Boolean)
+      .filter((line): line is string => Boolean(line))
       .join("\n");
   }
 
   return [
     `[POLYMARKET FIRST TRADE] ${formatUsd(alert.tradeUsd)}`,
     `Wallet: ${shortWallet(alert.wallet)}`,
-    `Market: ${alert.title ?? "Unknown market"}`,
-    `Outcome: ${alert.outcome ?? "-"}`,
-    `Side: ${alert.side ?? "-"}`,
+    `Market: ${alert.title}`,
+    `Outcome: ${alert.outcome || "-"}`,
+    `Side: ${alert.side || "-"}`,
     `Tracked funding: ${formatUsd(alert.fundedUsd)}`,
     `Observed trade volume since funding: ${formatUsd(alert.observedTradeUsd)}`,
-    alert.transactionHash ? `Tx: https://polygonscan.com/tx/${alert.transactionHash}` : null
-  ]
-    .filter(Boolean)
-    .join("\n");
+    `Tx: https://polygonscan.com/tx/${alert.transactionHash}`
+  ].join("\n");
 }
 
-export async function publishWebhookAlert(webhookUrl, payload, fetchImpl = fetch) {
+export async function publishWebhookAlert(
+  webhookUrl: string,
+  payload: PublishedMonitorAlert,
+  fetchImpl: FetchLike = fetch
+): Promise<void> {
   if (!webhookUrl) {
     return;
   }

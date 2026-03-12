@@ -1,14 +1,22 @@
 import fs from "node:fs/promises";
+import http, { type IncomingMessage, type ServerResponse } from "node:http";
 import path from "node:path";
-import http from "node:http";
 import { fileURLToPath } from "node:url";
 
 import { createFlowSentinelApp } from "./create-sentinel-app.js";
 
+import type { MonitorSnapshot, PublishedMonitorAlert } from "./types.js";
+
+interface RuntimeBrokerTarget {
+  on(eventName: "snapshot", listener: (snapshot: MonitorSnapshot) => void): unknown;
+  on(eventName: "alert", listener: (alert: PublishedMonitorAlert) => void): unknown;
+  getSnapshot(): MonitorSnapshot;
+}
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.resolve(__dirname, "../public");
 
-const CONTENT_TYPES = {
+const CONTENT_TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",
   ".js": "application/javascript; charset=utf-8",
@@ -18,7 +26,12 @@ const CONTENT_TYPES = {
   ".ico": "image/x-icon"
 };
 
-function sendJson(response, statusCode, payload, headOnly = false) {
+function sendJson(
+  response: ServerResponse<IncomingMessage>,
+  statusCode: number,
+  payload: unknown,
+  headOnly = false
+): void {
   response.writeHead(statusCode, {
     "content-type": "application/json; charset=utf-8",
     "cache-control": "no-store"
@@ -26,7 +39,11 @@ function sendJson(response, statusCode, payload, headOnly = false) {
   response.end(headOnly ? undefined : JSON.stringify(payload));
 }
 
-async function serveStatic(requestPath, response, headOnly = false) {
+async function serveStatic(
+  requestPath: string,
+  response: ServerResponse<IncomingMessage>,
+  headOnly = false
+): Promise<void> {
   const normalizedPath =
     requestPath === "/" ? "/index.html" : requestPath === "/favicon.ico" ? "/favicon.svg" : requestPath;
   const resolvedPath = path.resolve(publicDir, `.${normalizedPath}`);
@@ -45,8 +62,8 @@ async function serveStatic(requestPath, response, headOnly = false) {
       "cache-control": normalizedPath === "/index.html" ? "no-cache" : "public, max-age=60"
     });
     response.end(headOnly ? undefined : body);
-  } catch (error) {
-    if (error?.code === "ENOENT") {
+  } catch (error: unknown) {
+    if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") {
       sendJson(response, 404, { error: "Not found" }, headOnly);
       return;
     }
@@ -55,10 +72,12 @@ async function serveStatic(requestPath, response, headOnly = false) {
   }
 }
 
-function createSseBroker(runtime) {
-  const clients = new Set();
+function createSseBroker(runtime: RuntimeBrokerTarget): {
+  addClient(response: ServerResponse<IncomingMessage>): void;
+} {
+  const clients = new Set<ServerResponse<IncomingMessage>>();
 
-  function broadcast(event, payload) {
+  function broadcast(event: "snapshot" | "alert", payload: MonitorSnapshot | PublishedMonitorAlert): void {
     const body = `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`;
 
     for (const client of clients) {
@@ -66,11 +85,11 @@ function createSseBroker(runtime) {
     }
   }
 
-  runtime.on("snapshot", (snapshot) => broadcast("snapshot", snapshot));
-  runtime.on("alert", (alert) => broadcast("alert", alert));
+  runtime.on("snapshot", (snapshot: MonitorSnapshot) => broadcast("snapshot", snapshot));
+  runtime.on("alert", (alert: PublishedMonitorAlert) => broadcast("alert", alert));
 
   return {
-    addClient(response) {
+    addClient(response: ServerResponse<IncomingMessage>): void {
       response.writeHead(200, {
         "content-type": "text/event-stream; charset=utf-8",
         "cache-control": "no-cache, no-transform",
@@ -92,7 +111,7 @@ function createSseBroker(runtime) {
   };
 }
 
-async function main() {
+async function main(): Promise<void> {
   const { config, runtime } = createFlowSentinelApp([]);
   await runtime.initialize();
   runtime.start();
@@ -122,7 +141,7 @@ async function main() {
       try {
         await runtime.scanNow("manual");
         sendJson(response, 200, runtime.getSnapshot());
-      } catch (error) {
+      } catch (error: unknown) {
         sendJson(response, 500, {
           error: error instanceof Error ? error.message : String(error),
           snapshot: runtime.getSnapshot()
@@ -156,7 +175,7 @@ async function main() {
   });
 }
 
-main().catch((error) => {
+main().catch((error: unknown) => {
   console.error(error instanceof Error ? error.stack : String(error));
   process.exitCode = 1;
 });

@@ -1,12 +1,14 @@
-import { loadConfig } from "./config.js";
-import { PolymarketDataClient } from "./polymarket-data-client.js";
-import { PolygonRpcClient } from "./polygon-rpc-client.js";
 import { AssetPriceClient } from "./asset-price-client.js";
-import { JsonMonitorStateStore } from "./json-state-store.js";
+import { loadConfig } from "./config.js";
 import { FundingLifecycleMonitor } from "./funding-lifecycle-monitor.js";
+import { JsonMonitorStateStore } from "./json-state-store.js";
 import { MonitorRuntime } from "./monitor-runtime.js";
+import { PolygonRpcClient } from "./polygon-rpc-client.js";
+import { PolymarketDataClient } from "./polymarket-data-client.js";
 
-export function createFlowSentinelApp(argv = process.argv.slice(2)) {
+import type { CreateAppResult } from "./types.js";
+
+export function createFlowSentinelApp(argv: string[] = process.argv.slice(2)): CreateAppResult {
   const config = loadConfig(argv);
   const polygonRpcClient = new PolygonRpcClient({
     rpcUrl: config.polygonRpcUrl,

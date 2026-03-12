@@ -24,8 +24,14 @@ npm start
 CLI로 한 번만 스캔:
 
 ```bash
-node src/monitor-cli.js --once
+npm run track:once
 ```
+
+## TypeScript
+
+- 서버, 모니터, 테스트 코드는 모두 TypeScript로 전환되었습니다.
+- 브라우저 클라이언트 소스는 `client/dashboard-client.ts`에 있고, `npm start`나 `npm run build:client` 시 `public/dashboard-client.js`로 생성됩니다.
+- 타입 검사는 `strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes` 등을 켠 상태로 `npm run typecheck`에서 수행합니다.
 
 ## Environment variables
 

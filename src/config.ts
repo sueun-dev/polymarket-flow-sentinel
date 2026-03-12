@@ -1,6 +1,8 @@
 import path from "node:path";
 
-const DEFAULTS = {
+import type { BootstrapMode, MonitorConfig } from "./types.js";
+
+const DEFAULTS: Omit<MonitorConfig, "once"> = {
   dataApiBaseUrl: "https://data-api.polymarket.com",
   polygonRpcUrl: "https://polygon.drpc.org",
   minFundingUsd: 50_000,
@@ -17,12 +19,13 @@ const DEFAULTS = {
   maxSentEventKeys: 20_000,
   maxRecentAlerts: 100,
   stateFile: path.resolve(process.cwd(), ".data/polymarket-flow-sentinel.json"),
+  webhookUrl: "",
   bootstrapMode: "scan",
   host: "0.0.0.0",
   port: 3000
 };
 
-function readNumber(name, fallback, { allowZero = false } = {}) {
+function readNumber(name: string, fallback: number, { allowZero = false }: { allowZero?: boolean } = {}): number {
   const raw = process.env[name];
 
   if (!raw) {
@@ -38,18 +41,24 @@ function readNumber(name, fallback, { allowZero = false } = {}) {
   return value;
 }
 
-export function loadConfig(argv = process.argv.slice(2)) {
-  const once = argv.includes("--once");
-  const bootstrapMode = process.env.POLYMARKET_BOOTSTRAP_MODE ?? DEFAULTS.bootstrapMode;
+function readBootstrapMode(rawValue: string | undefined): BootstrapMode {
+  const value = rawValue ?? DEFAULTS.bootstrapMode;
 
-  if (!["skip", "scan"].includes(bootstrapMode)) {
+  if (value !== "skip" && value !== "scan") {
     throw new Error("POLYMARKET_BOOTSTRAP_MODE must be either 'skip' or 'scan'.");
   }
 
+  return value;
+}
+
+export function loadConfig(argv: string[] = process.argv.slice(2)): MonitorConfig {
+  const once = argv.includes("--once");
+  const bootstrapMode = readBootstrapMode(process.env["POLYMARKET_BOOTSTRAP_MODE"]);
+
   return {
     once,
-    dataApiBaseUrl: process.env.POLYMARKET_DATA_API_BASE_URL ?? DEFAULTS.dataApiBaseUrl,
-    polygonRpcUrl: process.env.POLYGON_RPC_URL ?? DEFAULTS.polygonRpcUrl,
+    dataApiBaseUrl: process.env["POLYMARKET_DATA_API_BASE_URL"] ?? DEFAULTS.dataApiBaseUrl,
+    polygonRpcUrl: process.env["POLYGON_RPC_URL"] ?? DEFAULTS.polygonRpcUrl,
     minFundingUsd: readNumber("POLYMARKET_MIN_FUNDING_USD", DEFAULTS.minFundingUsd),
     minTradeUsd: readNumber("POLYMARKET_MIN_TRADE_USD", DEFAULTS.minTradeUsd, { allowZero: true }),
     pollIntervalMs: readNumber("POLYMARKET_POLL_INTERVAL_MS", DEFAULTS.pollIntervalMs),
@@ -66,10 +75,10 @@ export function loadConfig(argv = process.argv.slice(2)) {
     maxSentEventKeys: readNumber("POLYMARKET_MAX_SENT_EVENT_KEYS", DEFAULTS.maxSentEventKeys),
     maxRecentAlerts: readNumber("POLYMARKET_MAX_RECENT_ALERTS", DEFAULTS.maxRecentAlerts),
     requestTimeoutMs: readNumber("POLYMARKET_REQUEST_TIMEOUT_MS", DEFAULTS.requestTimeoutMs),
-    stateFile: path.resolve(process.env.POLYMARKET_STATE_FILE ?? DEFAULTS.stateFile),
-    webhookUrl: process.env.POLYMARKET_WEBHOOK_URL ?? "",
+    stateFile: path.resolve(process.env["POLYMARKET_STATE_FILE"] ?? DEFAULTS.stateFile),
+    webhookUrl: process.env["POLYMARKET_WEBHOOK_URL"] ?? DEFAULTS.webhookUrl,
     bootstrapMode,
-    host: process.env.HOST ?? DEFAULTS.host,
+    host: process.env["HOST"] ?? DEFAULTS.host,
     port: readNumber("PORT", DEFAULTS.port)
   };
 }

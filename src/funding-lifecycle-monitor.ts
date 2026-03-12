@@ -1,22 +1,67 @@
 import { formatMonitorAlertMessage, publishWebhookAlert } from "./alert-publisher.js";
+import { POLYMARKET_CONTRACTS, FIRST_USE_CONTRACTS } from "./polymarket-address-book.js";
 import { getTradeUsdSize } from "./polymarket-data-client.js";
 import { POLYGON_FUNDING_ASSETS } from "./polygon-funding-assets.js";
-import { FIRST_USE_CONTRACTS, POLYMARKET_CONTRACTS } from "./polymarket-address-book.js";
 
-const IGNORED_WALLETS = new Set([
+import type {
+  AssetPriceClientLike,
+  FetchLike,
+  FirstUseRecord,
+  FundingRecord,
+  LoggerLike,
+  MonitorConfig,
+  MonitorRunResult,
+  MonitorStateStoreLike,
+  PendingMonitorAlert,
+  PolygonClientLike,
+  PolymarketActivityRow,
+  PolymarketDataClientLike,
+  PricedFundingTransfer,
+  PublishedMonitorAlert,
+  TrackedWalletRecord,
+  WalletKind,
+  WalletStatus
+} from "./types.js";
+
+interface SortableBlockPosition {
+  blockNumber: number;
+  logIndex: number;
+}
+
+interface FundingRegistrationResult {
+  tracked: boolean;
+  alert: PublishedMonitorAlert | null;
+}
+
+interface TradeSummary {
+  count: number;
+  usd: number;
+}
+
+interface FundingLifecycleMonitorOptions {
+  polygonClient: PolygonClientLike;
+  polymarketClient: PolymarketDataClientLike;
+  priceClient: AssetPriceClientLike;
+  stateStore: MonitorStateStoreLike;
+  config: MonitorConfig;
+  logger?: LoggerLike;
+  fetchImpl?: FetchLike;
+}
+
+const IGNORED_WALLETS = new Set<string>([
   ...Object.values(POLYMARKET_CONTRACTS).map((address) => address.toLowerCase()),
   "0x0000000000000000000000000000000000000000"
 ]);
 
-function toIsoFromUnix(timestamp) {
-  return new Date(timestamp * 1000).toISOString();
+function toIsoFromUnix(timestamp: number): string {
+  return new Date(timestamp * 1_000).toISOString();
 }
 
-function normalizeAddress(value) {
+function normalizeAddress(value: string | null | undefined): string {
   return (value ?? "").toLowerCase();
 }
 
-function sortByBlockAndIndex(left, right) {
+function sortByBlockAndIndex<T extends SortableBlockPosition>(left: T, right: T): number {
   if (left.blockNumber !== right.blockNumber) {
     return left.blockNumber - right.blockNumber;
   }
@@ -24,21 +69,19 @@ function sortByBlockAndIndex(left, right) {
   return left.logIndex - right.logIndex;
 }
 
-function createFundingTransferKey(transfer) {
-  return `${transfer.assetAddress ?? "native"}:${transfer.transactionHash}:${transfer.logIndex}:${normalizeAddress(
-    transfer.to
-  )}`;
+function createFundingTransferKey(transfer: PricedFundingTransfer): string {
+  return `${transfer.assetAddress}:${transfer.transactionHash}:${transfer.logIndex}:${normalizeAddress(transfer.to)}`;
 }
 
-function createEventKey(stage, wallet, uniquePart) {
+function createEventKey(stage: PendingMonitorAlert["stage"], wallet: string, uniquePart: string): string {
   return `${normalizeAddress(wallet)}:${stage}:${uniquePart}`;
 }
 
-function isEmptyCode(value) {
-  return /^0x0*$/i.test(value ?? "");
+function isEmptyCode(value: string): boolean {
+  return /^0x0*$/i.test(value);
 }
 
-function deriveWalletStatus(record) {
+function deriveWalletStatus(record: Pick<TrackedWalletRecord, "firstUse" | "firstTrade">): WalletStatus {
   if (record.firstTrade) {
     return "first-trade";
   }
@@ -50,8 +93,8 @@ function deriveWalletStatus(record) {
   return "funded";
 }
 
-function summarizeTrades(trades) {
-  return trades.reduce(
+function summarizeTrades(trades: readonly PolymarketActivityRow[]): TradeSummary {
+  return trades.reduce<TradeSummary>(
     (summary, trade) => {
       summary.count += 1;
       summary.usd += getTradeUsdSize(trade);
@@ -62,15 +105,23 @@ function summarizeTrades(trades) {
 }
 
 export class FundingLifecycleMonitor {
+  private readonly polygonClient: PolygonClientLike;
+  private readonly polymarketClient: PolymarketDataClientLike;
+  private readonly priceClient: AssetPriceClientLike;
+  private readonly stateStore: MonitorStateStoreLike;
+  private readonly config: MonitorConfig;
+  private readonly logger: LoggerLike;
+  private readonly fetchImpl: FetchLike;
+
   constructor({
     polygonClient,
     polymarketClient,
     priceClient,
     stateStore,
     config,
-    logger = console,
+    logger = console as LoggerLike,
     fetchImpl = fetch
-  }) {
+  }: FundingLifecycleMonitorOptions) {
     this.polygonClient = polygonClient;
     this.polymarketClient = polymarketClient;
     this.priceClient = priceClient;
@@ -80,18 +131,18 @@ export class FundingLifecycleMonitor {
     this.fetchImpl = fetchImpl;
   }
 
-  async initialize() {
+  async initialize(): Promise<void> {
     await this.stateStore.load();
   }
 
-  async emitAlert(alert) {
+  private async emitAlert(alert: PendingMonitorAlert): Promise<PublishedMonitorAlert | null> {
     const eventKey = createEventKey(alert.stage, alert.wallet, alert.uniqueKey);
 
     if (this.stateStore.hasSentEvent(eventKey)) {
       return null;
     }
 
-    const payload = {
+    const payload: PublishedMonitorAlert = {
       ...alert,
       message: formatMonitorAlertMessage(alert),
       triggeredAt: new Date().toISOString()
@@ -104,7 +155,7 @@ export class FundingLifecycleMonitor {
     return payload;
   }
 
-  async buildTrackedWalletRecord(wallet, funding, walletKind) {
+  private buildTrackedWalletRecord(wallet: string, funding: FundingRecord, walletKind: WalletKind): TrackedWalletRecord {
     return {
       wallet,
       walletKind,
@@ -119,9 +170,9 @@ export class FundingLifecycleMonitor {
     };
   }
 
-  async registerFunding(transfer) {
+  private async registerFunding(transfer: PricedFundingTransfer): Promise<FundingRegistrationResult> {
     const fundingTimestamp = await this.polygonClient.getBlockTimestamp(transfer.blockNumber);
-    const funding = {
+    const funding: FundingRecord = {
       assetSymbol: transfer.assetSymbol,
       assetAddress: transfer.assetAddress,
       amountToken: transfer.amountToken,
@@ -149,8 +200,8 @@ export class FundingLifecycleMonitor {
       }
 
       const walletCode = await this.polygonClient.getCode(wallet);
-      const walletKind = isEmptyCode(walletCode) ? "EOA" : "Contract";
-      const record = await this.buildTrackedWalletRecord(wallet, funding, walletKind);
+      const walletKind: WalletKind = isEmptyCode(walletCode) ? "EOA" : "Contract";
+      const record = this.buildTrackedWalletRecord(wallet, funding, walletKind);
       this.stateStore.upsertTrackedWallet(wallet, () => record);
 
       const alert = await this.emitAlert({
@@ -176,18 +227,25 @@ export class FundingLifecycleMonitor {
     }
 
     this.stateStore.upsertTrackedWallet(wallet, (current) => {
-      const totalFundedUsd = (current?.totalFundedUsd ?? 0) + funding.amountUsd;
-      const nextRecord = {
+      if (!current) {
+        return null;
+      }
+
+      const nextRecord: TrackedWalletRecord = {
         ...current,
-        totalFundedUsd,
-        fundingCount: (current?.fundingCount ?? 0) + 1,
-        latestFunding: funding
+        totalFundedUsd: current.totalFundedUsd + funding.amountUsd,
+        fundingCount: current.fundingCount + 1,
+        latestFunding: funding,
+        status: deriveWalletStatus(current)
       };
-      nextRecord.status = deriveWalletStatus(nextRecord);
       return nextRecord;
     });
 
     const updated = this.stateStore.getTrackedWallet(wallet);
+    if (!updated) {
+      return { tracked: true, alert: null };
+    }
+
     const alert = await this.emitAlert({
       stage: "funding",
       wallet,
@@ -206,7 +264,7 @@ export class FundingLifecycleMonitor {
     return { tracked: true, alert };
   }
 
-  async registerFirstUse(wallet, use) {
+  private async registerFirstUse(wallet: string, use: FirstUseRecord): Promise<PublishedMonitorAlert | null> {
     const current = this.stateStore.getTrackedWallet(wallet);
 
     if (!current || current.firstUse) {
@@ -214,19 +272,27 @@ export class FundingLifecycleMonitor {
     }
 
     this.stateStore.upsertTrackedWallet(wallet, (record) => {
-      const nextRecord = {
+      if (!record) {
+        return null;
+      }
+
+      return {
         ...record,
         firstUse: use,
         status: "first-use"
       };
-      return nextRecord;
     });
+
+    const updated = this.stateStore.getTrackedWallet(wallet);
+    if (!updated) {
+      return null;
+    }
 
     return this.emitAlert({
       stage: "first-use",
       wallet,
       useKind: use.kind,
-      fundedUsd: this.stateStore.getTrackedWallet(wallet).totalFundedUsd,
+      fundedUsd: updated.totalFundedUsd,
       transactionHash: use.transactionHash,
       blockNumber: use.blockNumber ?? null,
       timestamp: use.timestamp,
@@ -234,7 +300,11 @@ export class FundingLifecycleMonitor {
     });
   }
 
-  async registerFirstTrade(wallet, trade, observedTrades) {
+  private async registerFirstTrade(
+    wallet: string,
+    trade: PolymarketActivityRow,
+    observedTrades: readonly PolymarketActivityRow[]
+  ): Promise<PublishedMonitorAlert | null> {
     const current = this.stateStore.getTrackedWallet(wallet);
 
     if (!current || current.firstTrade) {
@@ -258,19 +328,22 @@ export class FundingLifecycleMonitor {
     };
 
     this.stateStore.upsertTrackedWallet(wallet, (record) => {
-      const nextRecord = {
+      if (!record) {
+        return null;
+      }
+
+      return {
         ...record,
         firstUse:
           record.firstUse ??
-          {
+          ({
             kind: "trade-activity",
             timestamp: trade.timestamp,
             transactionHash: trade.transactionHash
-          },
+          } satisfies FirstUseRecord),
         firstTrade,
         status: "first-trade"
       };
-      return nextRecord;
     });
 
     if (tradeUsd < this.config.minTradeUsd) {
@@ -295,15 +368,15 @@ export class FundingLifecycleMonitor {
     });
   }
 
-  async collectFundingTransfers(fromBlock, toBlock) {
-    const transfers = [];
+  private async collectFundingTransfers(fromBlock: number, toBlock: number): Promise<PricedFundingTransfer[]> {
+    const transfers: PricedFundingTransfer[] = [];
 
     for (const asset of POLYGON_FUNDING_ASSETS) {
-      let usdPrice;
+      let usdPrice: number;
 
       try {
         usdPrice = await this.priceClient.getUsdPrice(asset);
-      } catch (error) {
+      } catch (error: unknown) {
         this.logger.error(
           `Skipping funding asset ${asset.symbol} for blocks ${fromBlock}-${toBlock}: ${
             error instanceof Error ? error.message : String(error)
@@ -349,7 +422,10 @@ export class FundingLifecycleMonitor {
     return transfers.sort(sortByBlockAndIndex);
   }
 
-  async processFundingTransfers(fromBlock, toBlock) {
+  private async processFundingTransfers(
+    fromBlock: number,
+    toBlock: number
+  ): Promise<{ newTrackedWallets: number; alerts: PublishedMonitorAlert[] }> {
     const transfers = await this.collectFundingTransfers(fromBlock, toBlock);
     const sameTransactionSenders = new Set(
       transfers.map((transfer) => `${transfer.transactionHash}:${normalizeAddress(transfer.from)}`)
@@ -358,13 +434,12 @@ export class FundingLifecycleMonitor {
       .filter(
         (transfer) =>
           transfer.value >= this.config.minFundingUsd &&
-          transfer.to &&
           !sameTransactionSenders.has(`${transfer.transactionHash}:${normalizeAddress(transfer.to)}`)
       )
       .sort(sortByBlockAndIndex);
 
     let newTrackedWallets = 0;
-    const alerts = [];
+    const alerts: PublishedMonitorAlert[] = [];
 
     for (const transfer of candidateTransfers) {
       const transferKey = createFundingTransferKey(transfer);
@@ -379,7 +454,7 @@ export class FundingLifecycleMonitor {
       if (result.tracked) {
         const existing = this.stateStore.getTrackedWallet(transfer.to);
 
-        if (existing?.fundingCount === 1 && existing?.firstFunding?.transactionHash === transfer.transactionHash) {
+        if (existing?.fundingCount === 1 && existing.firstFunding.transactionHash === transfer.transactionHash) {
           newTrackedWallets += 1;
         }
       }
@@ -395,7 +470,10 @@ export class FundingLifecycleMonitor {
     };
   }
 
-  async processOnChainUseSignals(fromBlock, toBlock) {
+  private async processOnChainUseSignals(
+    fromBlock: number,
+    toBlock: number
+  ): Promise<{ alerts: PublishedMonitorAlert[] }> {
     const [usdcApprovals, approvalForAllLogs] = await Promise.all([
       this.polygonClient.getUsdcApprovalLogs({
         fromBlock,
@@ -410,7 +488,7 @@ export class FundingLifecycleMonitor {
       })
     ]);
 
-    const alerts = [];
+    const alerts: PublishedMonitorAlert[] = [];
 
     for (const approval of usdcApprovals.sort(sortByBlockAndIndex)) {
       if (!FIRST_USE_CONTRACTS.usdcApprovalSpenders.includes(approval.spender) || approval.value <= 0) {
@@ -480,9 +558,9 @@ export class FundingLifecycleMonitor {
     return { alerts };
   }
 
-  async refreshTrackedWallets() {
+  private async refreshTrackedWallets(): Promise<{ checkedWallets: number; alerts: PublishedMonitorAlert[] }> {
     const trackedWallets = this.stateStore.listTrackedWallets();
-    const alerts = [];
+    const alerts: PublishedMonitorAlert[] = [];
     let checkedWallets = 0;
 
     for (const walletRecord of trackedWallets) {
@@ -494,41 +572,30 @@ export class FundingLifecycleMonitor {
 
       const firstTrade = await this.polymarketClient.getFirstTrade(walletRecord.wallet);
 
-      if (firstTrade) {
-        if (firstTrade.timestamp >= walletRecord.firstFunding.timestamp) {
-          const observedTrades = await this.polymarketClient.getTradeActivitySince(
-            walletRecord.wallet,
-            walletRecord.firstFunding.timestamp
-          );
+      if (firstTrade && firstTrade.timestamp >= walletRecord.firstFunding.timestamp) {
+        const observedTrades = await this.polymarketClient.getTradeActivitySince(
+          walletRecord.wallet,
+          walletRecord.firstFunding.timestamp
+        );
 
-          if (!walletRecord.firstUse) {
-            const firstUseAlert = await this.registerFirstUse(walletRecord.wallet, {
-              kind: "trade-activity",
-              transactionHash: firstTrade.transactionHash,
-              timestamp: firstTrade.timestamp
-            });
+        if (!walletRecord.firstUse) {
+          const firstUseAlert = await this.registerFirstUse(walletRecord.wallet, {
+            kind: "trade-activity",
+            transactionHash: firstTrade.transactionHash,
+            timestamp: firstTrade.timestamp
+          });
 
-            if (firstUseAlert) {
-              alerts.push(firstUseAlert);
-            }
-          }
-
-          const firstTradeAlert = await this.registerFirstTrade(walletRecord.wallet, firstTrade, observedTrades);
-
-          if (firstTradeAlert) {
-            alerts.push(firstTradeAlert);
+          if (firstUseAlert) {
+            alerts.push(firstUseAlert);
           }
         }
 
-        this.stateStore.upsertTrackedWallet(walletRecord.wallet, (record) => ({
-          ...record,
-          lastCheckedAt: new Date().toISOString(),
-          status: deriveWalletStatus(record)
-        }));
-        continue;
-      }
+        const firstTradeAlert = await this.registerFirstTrade(walletRecord.wallet, firstTrade, observedTrades);
 
-      if (!walletRecord.firstUse) {
+        if (firstTradeAlert) {
+          alerts.push(firstTradeAlert);
+        }
+      } else if (!walletRecord.firstUse) {
         const firstActivity = await this.polymarketClient.getFirstActivity(walletRecord.wallet);
 
         if (firstActivity && firstActivity.timestamp >= walletRecord.firstFunding.timestamp) {
@@ -544,11 +611,17 @@ export class FundingLifecycleMonitor {
         }
       }
 
-      this.stateStore.upsertTrackedWallet(walletRecord.wallet, (record) => ({
-        ...record,
-        lastCheckedAt: new Date().toISOString(),
-        status: deriveWalletStatus(record)
-      }));
+      this.stateStore.upsertTrackedWallet(walletRecord.wallet, (record) => {
+        if (!record) {
+          return null;
+        }
+
+        return {
+          ...record,
+          lastCheckedAt: new Date().toISOString(),
+          status: deriveWalletStatus(record)
+        };
+      });
     }
 
     return {
@@ -557,7 +630,7 @@ export class FundingLifecycleMonitor {
     };
   }
 
-  async runOnce() {
+  async runOnce(): Promise<MonitorRunResult> {
     const latestBlock = await this.polygonClient.getBlockNumber();
     const previousBlock = this.stateStore.getLastProcessedBlock();
 
@@ -579,6 +652,7 @@ export class FundingLifecycleMonitor {
         latestBlock,
         lastProcessedBlock: latestBlock,
         processedBlocks: 0,
+        newTrackedWallets: 0,
         checkedWallets: 0
       };
     }
@@ -589,7 +663,7 @@ export class FundingLifecycleMonitor {
         : previousBlock + 1;
 
     let processedBlocks = 0;
-    const alerts = [];
+    const alerts: PublishedMonitorAlert[] = [];
     let newTrackedWallets = 0;
 
     while (nextBlock <= latestBlock) {
@@ -597,8 +671,7 @@ export class FundingLifecycleMonitor {
       const fundingResult = await this.processFundingTransfers(nextBlock, toBlock);
       const chainUseResult = await this.processOnChainUseSignals(nextBlock, toBlock);
 
-      alerts.push(...fundingResult.alerts);
-      alerts.push(...chainUseResult.alerts);
+      alerts.push(...fundingResult.alerts, ...chainUseResult.alerts);
       newTrackedWallets += fundingResult.newTrackedWallets;
       processedBlocks += toBlock - nextBlock + 1;
       this.stateStore.setLastProcessedBlock(toBlock);
@@ -609,16 +682,14 @@ export class FundingLifecycleMonitor {
     const walletRefreshResult = await this.refreshTrackedWallets();
     alerts.push(...walletRefreshResult.alerts);
 
-    const lastProcessedBlock = this.stateStore.getLastProcessedBlock();
-    const chainStatus = {
+    const lastProcessedBlock = this.stateStore.getLastProcessedBlock() ?? latestBlock;
+    this.stateStore.recordMonitorSync({
       latestBlock,
       lastProcessedBlock,
       lagBlocks: Math.max(0, latestBlock - lastProcessedBlock),
       checkedAt: new Date().toISOString(),
       processedBlocks
-    };
-
-    this.stateStore.recordMonitorSync(chainStatus);
+    });
     await this.stateStore.save();
 
     return {
