@@ -1,15 +1,113 @@
-import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import test from "node:test";
 
-import { getTradeUsdSize } from "../src/polymarket-data-client.js";
-import { decodeErc20TransferLog } from "../src/polygon-rpc-client.js";
-import { JsonMonitorStateStore } from "../src/json-state-store.js";
 import { FundingLifecycleMonitor } from "../src/funding-lifecycle-monitor.js";
+import { JsonMonitorStateStore } from "../src/json-state-store.js";
 import { POLYMARKET_CONTRACTS } from "../src/polymarket-address-book.js";
+import { getTradeUsdSize } from "../src/polymarket-data-client.js";
 import { POLYGON_FUNDING_ASSETS } from "../src/polygon-funding-assets.js";
+import { decodeErc20TransferLog } from "../src/polygon-rpc-client.js";
+
+import type {
+  AssetPriceClientLike,
+  LoggerLike,
+  MonitorConfig,
+  PolygonClientLike,
+  PolymarketActivityRow,
+  PolymarketDataClientLike
+} from "../src/types.js";
+
+function createLogger(): LoggerLike {
+  return {
+    info() {},
+    error() {}
+  };
+}
+
+function createTestConfig(overrides: Partial<MonitorConfig> = {}): MonitorConfig {
+  return {
+    once: false,
+    dataApiBaseUrl: "https://data-api.polymarket.com",
+    polygonRpcUrl: "https://polygon.drpc.org",
+    minFundingUsd: 50_000,
+    minTradeUsd: 0,
+    pollIntervalMs: 1_000,
+    startupLookbackBlocks: 50,
+    blockBatchSize: 10,
+    activityPageSize: 500,
+    activityPageCount: 10,
+    priceCacheMs: 60_000,
+    maxTrackedWallets: 100,
+    maxSeenFundingTransfers: 100,
+    maxSentEventKeys: 100,
+    maxRecentAlerts: 20,
+    requestTimeoutMs: 5_000,
+    stateFile: path.join(os.tmpdir(), `flow-sentinel-config-${process.pid}.json`),
+    webhookUrl: "",
+    bootstrapMode: "scan",
+    host: "127.0.0.1",
+    port: 3001,
+    ...overrides
+  };
+}
+
+function createPolygonClientStub(
+  overrides: Partial<PolygonClientLike> = {}
+): PolygonClientLike {
+  return {
+    async getBlockNumber() {
+      return 0;
+    },
+    async getCode() {
+      return "0x";
+    },
+    async getBlockTimestamp() {
+      return 0;
+    },
+    async getErc20TransferLogs() {
+      return [];
+    },
+    async getNativeTransfers() {
+      return [];
+    },
+    async getUsdcApprovalLogs() {
+      return [];
+    },
+    async getApprovalForAllLogs() {
+      return [];
+    },
+    ...overrides
+  };
+}
+
+function createPolymarketClientStub(
+  overrides: Partial<PolymarketDataClientLike> = {}
+): PolymarketDataClientLike {
+  return {
+    async getFirstActivity() {
+      return null;
+    },
+    async getFirstTrade() {
+      return null;
+    },
+    async getTradeActivitySince() {
+      return [];
+    },
+    ...overrides
+  };
+}
+
+function createPriceClientStub(overrides: Partial<AssetPriceClientLike> = {}): AssetPriceClientLike {
+  return {
+    async getUsdPrice() {
+      return 1;
+    },
+    ...overrides
+  };
+}
 
 test("getTradeUsdSize prefers explicit usdcSize", () => {
   assert.equal(
@@ -61,32 +159,18 @@ test("FundingLifecycleMonitor bootstraps to the latest block in skip mode", asyn
   const filePath = path.join(os.tmpdir(), `polymarket-flow-sentinel-bootstrap-${process.pid}-${Date.now()}.json`);
   const stateStore = new JsonMonitorStateStore(filePath, 100, 100, 100);
   const monitor = new FundingLifecycleMonitor({
-    polygonClient: {
+    polygonClient: createPolygonClientStub({
       async getBlockNumber() {
         return 42;
       }
-    },
-    polymarketClient: {},
-    priceClient: {
-      async getUsdPrice() {
-        return 1;
-      }
-    },
+    }),
+    polymarketClient: createPolymarketClientStub(),
+    priceClient: createPriceClientStub(),
     stateStore,
-    config: {
-      minFundingUsd: 50_000,
-      minTradeUsd: 0,
-      pollIntervalMs: 1_000,
-      bootstrapMode: "skip",
-      startupLookbackBlocks: 50,
-      blockBatchSize: 10,
-      maxRecentAlerts: 20,
-      webhookUrl: ""
-    },
-    logger: {
-      info() {},
-      error() {}
-    }
+    config: createTestConfig({
+      bootstrapMode: "skip"
+    }),
+    logger: createLogger()
   });
 
   await monitor.initialize();
@@ -103,7 +187,7 @@ test("FundingLifecycleMonitor records funding, first use, and first trade", asyn
   const filePath = path.join(os.tmpdir(), `polymarket-flow-sentinel-lifecycle-${process.pid}-${Date.now()}.json`);
   const stateStore = new JsonMonitorStateStore(filePath, 100, 100, 100);
   const wallet = "0x2222222222222222222222222222222222222222";
-  const trade = {
+  const trade: PolymarketActivityRow = {
     proxyWallet: wallet,
     transactionHash: "0xtrade",
     timestamp: 1_010,
@@ -113,8 +197,9 @@ test("FundingLifecycleMonitor records funding, first use, and first trade", asyn
     slug: "eth-close-up",
     usdcSize: 12_500
   };
+  let firstActivityChecks = 0;
   const monitor = new FundingLifecycleMonitor({
-    polygonClient: {
+    polygonClient: createPolygonClientStub({
       async getBlockNumber() {
         return 10;
       },
@@ -139,9 +224,6 @@ test("FundingLifecycleMonitor records funding, first use, and first trade", asyn
 
         return [];
       },
-      async getNativeTransfers() {
-        return [];
-      },
       async getUsdcApprovalLogs() {
         return [
           {
@@ -156,20 +238,13 @@ test("FundingLifecycleMonitor records funding, first use, and first trade", asyn
           }
         ];
       },
-      async getApprovalForAllLogs() {
-        return [];
-      },
-      async getBlockTimestamp(blockNumber) {
+      async getBlockTimestamp(blockNumber: number) {
         return 1_000 + blockNumber;
-      },
-      async getCode() {
-        return "0x";
       }
-    },
-    polymarketClient: {
-      firstActivityChecks: 0,
+    }),
+    polymarketClient: createPolymarketClientStub({
       async getFirstActivity() {
-        this.firstActivityChecks += 1;
+        firstActivityChecks += 1;
         return null;
       },
       async getFirstTrade() {
@@ -178,39 +253,32 @@ test("FundingLifecycleMonitor records funding, first use, and first trade", asyn
       async getTradeActivitySince() {
         return [trade];
       }
-    },
-    priceClient: {
+    }),
+    priceClient: createPriceClientStub({
       async getUsdPrice(asset) {
         const currentAsset = POLYGON_FUNDING_ASSETS.find((item) => item.address === asset.address);
         assert.ok(currentAsset);
         return 1;
       }
-    },
+    }),
     stateStore,
-    config: {
-      minFundingUsd: 50_000,
-      minTradeUsd: 0,
-      pollIntervalMs: 1_000,
+    config: createTestConfig({
       bootstrapMode: "scan",
-      startupLookbackBlocks: 5,
-      blockBatchSize: 10,
-      maxRecentAlerts: 20,
-      webhookUrl: ""
-    },
-    logger: {
-      info() {},
-      error() {}
-    }
+      startupLookbackBlocks: 5
+    }),
+    logger: createLogger()
   });
 
   await monitor.initialize();
   const result = await monitor.runOnce();
   const trackedWallet = stateStore.getTrackedWallet(wallet);
 
+  assert.equal(firstActivityChecks, 1);
   assert.equal(result.alerts.length, 3);
+  assert.ok(trackedWallet);
   assert.equal(trackedWallet.totalFundedUsd, 60_000);
-  assert.equal(trackedWallet.firstUse.kind, "USDC approval to CTF");
-  assert.equal(trackedWallet.firstTrade.usdSize, 12_500);
+  assert.equal(trackedWallet.firstUse?.kind, "USDC approval to CTF");
+  assert.equal(trackedWallet.firstTrade?.usdSize, 12_500);
   assert.equal(trackedWallet.status, "first-trade");
 
   await fs.unlink(filePath);

@@ -1,4 +1,6 @@
-export const POLYGON_FUNDING_ASSETS = Object.freeze([
+import type { PolygonFundingAsset } from "./types.js";
+
+export const POLYGON_FUNDING_ASSETS: readonly PolygonFundingAsset[] = Object.freeze([
   {
     symbol: "WBTC",
     address: "0x1BFD67037B42Cf73acF2047067bd4F2C47D9BfD6",

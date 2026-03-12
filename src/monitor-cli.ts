@@ -1,6 +1,6 @@
 import { createFlowSentinelApp } from "./create-sentinel-app.js";
 
-async function main() {
+async function main(): Promise<void> {
   const { config, runtime } = createFlowSentinelApp();
   await runtime.initialize();
 
@@ -17,7 +17,7 @@ async function main() {
   runtime.start();
 }
 
-main().catch((error) => {
+main().catch((error: unknown) => {
   console.error(error instanceof Error ? error.stack : String(error));
   process.exitCode = 1;
 });
