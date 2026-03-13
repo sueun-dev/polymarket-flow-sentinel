@@ -42,7 +42,12 @@ export class MonitorRuntime extends EventEmitter {
   private timer: NodeJS.Timeout | null = null;
   private currentPoll: Promise<MonitorRunResult> | null = null;
 
-  constructor({ monitor, stateStore, config, logger = console as LoggerLike }: MonitorRuntimeOptions) {
+  constructor({
+    monitor,
+    stateStore,
+    config,
+    logger = console as LoggerLike
+  }: MonitorRuntimeOptions) {
     super();
     this.monitor = monitor;
     this.stateStore = stateStore;
@@ -177,6 +182,9 @@ export class MonitorRuntime extends EventEmitter {
         trackedWalletCount: walletStats.trackedWalletCount,
         firstUseCount: walletStats.firstUseCount,
         firstTradeCount: walletStats.firstTradeCount,
+        depositCount: walletStats.depositCount,
+        activeCount: walletStats.activeCount,
+        depletedCount: walletStats.depletedCount,
         recentAlertCount: recentAlerts.length,
         lastAlertAt: recentAlerts[0]?.triggeredAt ?? null
       },

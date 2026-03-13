@@ -36,7 +36,31 @@ function sanitizeTrackedWallet(value: unknown): TrackedWalletRecord | null {
     return null;
   }
 
-  return value as unknown as TrackedWalletRecord;
+  const record = value as Record<string, unknown>;
+
+  if (!("totalDepositedUsdc" in record)) {
+    record["totalDepositedUsdc"] = 0;
+  }
+  if (!("depositCount" in record)) {
+    record["depositCount"] = 0;
+  }
+  if (!("firstDeposit" in record)) {
+    record["firstDeposit"] = null;
+  }
+  if (!("latestDeposit" in record)) {
+    record["latestDeposit"] = null;
+  }
+  if (!("positions" in record) || !Array.isArray(record["positions"])) {
+    record["positions"] = [];
+  }
+  if (!("totalBetUsd" in record)) {
+    record["totalBetUsd"] = 0;
+  }
+  if (!("positionCount" in record)) {
+    record["positionCount"] = 0;
+  }
+
+  return record as unknown as TrackedWalletRecord;
 }
 
 function sanitizeAlert(value: unknown): PublishedMonitorAlert | null {
@@ -74,7 +98,12 @@ export class JsonMonitorStateStore {
   private readonly seenFundingTransferKeySet = new Set<string>();
   private readonly sentEventKeySet = new Set<string>();
 
-  constructor(filePath: string, maxSeenFundingTransfers: number, maxSentEventKeys: number, maxTrackedWallets: number) {
+  constructor(
+    filePath: string,
+    maxSeenFundingTransfers: number,
+    maxSentEventKeys: number,
+    maxTrackedWallets: number
+  ) {
     this.filePath = filePath;
     this.maxSeenFundingTransfers = maxSeenFundingTransfers;
     this.maxSentEventKeys = maxSentEventKeys;
@@ -92,13 +121,17 @@ export class JsonMonitorStateStore {
 
       const parsed = JSON.parse(trimmed) as unknown;
       const parsedRecord = sanitizeObjectRecord<unknown>(parsed);
-      const trackedWalletEntries = Object.entries(sanitizeObjectRecord<unknown>(parsedRecord["trackedWallets"]))
+      const trackedWalletEntries = Object.entries(
+        sanitizeObjectRecord<unknown>(parsedRecord["trackedWallets"])
+      )
         .map(([key, value]) => {
           const wallet = sanitizeTrackedWallet(value);
           return wallet ? ([key, wallet] as const) : null;
         })
         .filter((entry): entry is readonly [string, TrackedWalletRecord] => entry !== null);
-      const recentAlerts = (Array.isArray(parsedRecord["recentAlerts"]) ? parsedRecord["recentAlerts"] : [])
+      const recentAlerts = (
+        Array.isArray(parsedRecord["recentAlerts"]) ? parsedRecord["recentAlerts"] : []
+      )
         .map((alert) => sanitizeAlert(alert))
         .filter((alert): alert is PublishedMonitorAlert => alert !== null);
 
@@ -113,11 +146,15 @@ export class JsonMonitorStateStore {
               .slice(-this.maxSeenFundingTransfers)
           : [],
         sentEventKeys: Array.isArray(parsedRecord["sentEventKeys"])
-          ? parsedRecord["sentEventKeys"].filter((value): value is string => typeof value === "string").slice(-this.maxSentEventKeys)
+          ? parsedRecord["sentEventKeys"]
+              .filter((value): value is string => typeof value === "string")
+              .slice(-this.maxSentEventKeys)
           : [],
         trackedWallets: Object.fromEntries(trackedWalletEntries),
         recentAlerts,
-        monitorStatus: sanitizeMonitorStatus(parsedRecord["monitorStatus"] ?? parsedRecord["trackerStatus"])
+        monitorStatus: sanitizeMonitorStatus(
+          parsedRecord["monitorStatus"] ?? parsedRecord["trackerStatus"]
+        )
       };
       this.seenFundingTransferKeySet.clear();
       this.sentEventKeySet.clear();
@@ -191,7 +228,10 @@ export class JsonMonitorStateStore {
     this.state.sentEventKeys.push(key);
 
     if (this.state.sentEventKeys.length > this.maxSentEventKeys) {
-      const overflow = this.state.sentEventKeys.splice(0, this.state.sentEventKeys.length - this.maxSentEventKeys);
+      const overflow = this.state.sentEventKeys.splice(
+        0,
+        this.state.sentEventKeys.length - this.maxSentEventKeys
+      );
 
       for (const item of overflow) {
         this.sentEventKeySet.delete(item);
@@ -254,10 +294,16 @@ export class JsonMonitorStateStore {
     trackedWalletCount: number;
     firstUseCount: number;
     firstTradeCount: number;
+    depositCount: number;
+    activeCount: number;
+    depletedCount: number;
   } {
     const wallets = this.listTrackedWallets();
     let firstUseCount = 0;
     let firstTradeCount = 0;
+    let depositCount = 0;
+    let activeCount = 0;
+    let depletedCount = 0;
 
     for (const wallet of wallets) {
       if (wallet.firstUse) {
@@ -267,12 +313,27 @@ export class JsonMonitorStateStore {
       if (wallet.firstTrade) {
         firstTradeCount += 1;
       }
+
+      if (wallet.depositCount > 0) {
+        depositCount += 1;
+      }
+
+      if (wallet.status === "active") {
+        activeCount += 1;
+      }
+
+      if (wallet.status === "depleted") {
+        depletedCount += 1;
+      }
     }
 
     return {
       trackedWalletCount: wallets.length,
       firstUseCount,
-      firstTradeCount
+      firstTradeCount,
+      depositCount,
+      activeCount,
+      depletedCount
     };
   }
 

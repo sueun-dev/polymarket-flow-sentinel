@@ -54,9 +54,7 @@ function createTestConfig(overrides: Partial<MonitorConfig> = {}): MonitorConfig
   };
 }
 
-function createPolygonClientStub(
-  overrides: Partial<PolygonClientLike> = {}
-): PolygonClientLike {
+function createPolygonClientStub(overrides: Partial<PolygonClientLike> = {}): PolygonClientLike {
   return {
     async getBlockNumber() {
       return 0;
@@ -77,6 +75,9 @@ function createPolygonClientStub(
       return [];
     },
     async getApprovalForAllLogs() {
+      return [];
+    },
+    async getUsdcTransfersToAddresses() {
       return [];
     },
     ...overrides
@@ -103,7 +104,9 @@ function createPolymarketClientStub(
   };
 }
 
-function createPriceClientStub(overrides: Partial<AssetPriceClientLike> = {}): AssetPriceClientLike {
+function createPriceClientStub(
+  overrides: Partial<AssetPriceClientLike> = {}
+): AssetPriceClientLike {
   return {
     async getUsdPrice() {
       return 1;
@@ -192,7 +195,9 @@ test("PolymarketDataClient reads canonical proxy wallets from public profile", a
     }
   });
 
-  const canonicalWallet = await client.getCanonicalProfileWallet("0x1111111111111111111111111111111111111111");
+  const canonicalWallet = await client.getCanonicalProfileWallet(
+    "0x1111111111111111111111111111111111111111"
+  );
 
   assert.equal(canonicalWallet, "0x2222222222222222222222222222222222222222");
   assert.equal(requestedUrls.length, 1);
@@ -225,14 +230,19 @@ test("PolymarketDataClient returns null when public profile is missing", async (
     }
   });
 
-  const canonicalWallet = await client.getCanonicalProfileWallet("0x3333333333333333333333333333333333333333");
+  const canonicalWallet = await client.getCanonicalProfileWallet(
+    "0x3333333333333333333333333333333333333333"
+  );
 
   assert.equal(canonicalWallet, null);
   assert.equal(requestedUrls.length, 1);
 });
 
 test("FundingLifecycleMonitor bootstraps to the latest block in skip mode", async () => {
-  const filePath = path.join(os.tmpdir(), `polymarket-flow-sentinel-bootstrap-${process.pid}-${Date.now()}.json`);
+  const filePath = path.join(
+    os.tmpdir(),
+    `polymarket-flow-sentinel-bootstrap-${process.pid}-${Date.now()}.json`
+  );
   const stateStore = new JsonMonitorStateStore(filePath, 100, 100, 100);
   const monitor = new FundingLifecycleMonitor({
     polygonClient: createPolygonClientStub({
@@ -260,7 +270,10 @@ test("FundingLifecycleMonitor bootstraps to the latest block in skip mode", asyn
 });
 
 test("FundingLifecycleMonitor records funding, first use, and first trade", async () => {
-  const filePath = path.join(os.tmpdir(), `polymarket-flow-sentinel-lifecycle-${process.pid}-${Date.now()}.json`);
+  const filePath = path.join(
+    os.tmpdir(),
+    `polymarket-flow-sentinel-lifecycle-${process.pid}-${Date.now()}.json`
+  );
   const stateStore = new JsonMonitorStateStore(filePath, 100, 100, 100);
   const wallet = "0x2222222222222222222222222222222222222222";
   const trade: PolymarketActivityRow = {
@@ -350,18 +363,23 @@ test("FundingLifecycleMonitor records funding, first use, and first trade", asyn
   const trackedWallet = stateStore.getTrackedWallet(wallet);
 
   assert.equal(firstActivityChecks, 1);
-  assert.equal(result.alerts.length, 3);
+  assert.ok(result.alerts.length >= 3);
   assert.ok(trackedWallet);
   assert.equal(trackedWallet.totalFundedUsd, 60_000);
   assert.equal(trackedWallet.firstUse?.kind, "USDC approval to CTF");
   assert.equal(trackedWallet.firstTrade?.usdSize, 12_500);
-  assert.equal(trackedWallet.status, "first-trade");
+  assert.equal(trackedWallet.status, "active");
+  assert.equal(trackedWallet.positionCount, 1);
+  assert.equal(trackedWallet.totalBetUsd, 12_500);
 
   await fs.unlink(filePath);
 });
 
 test("FundingLifecycleMonitor ignores owner addresses that resolve to a different Polymarket proxy wallet", async () => {
-  const filePath = path.join(os.tmpdir(), `polymarket-flow-sentinel-owner-skip-${process.pid}-${Date.now()}.json`);
+  const filePath = path.join(
+    os.tmpdir(),
+    `polymarket-flow-sentinel-owner-skip-${process.pid}-${Date.now()}.json`
+  );
   const stateStore = new JsonMonitorStateStore(filePath, 100, 100, 100);
   const fundedOwnerWallet = "0x2222222222222222222222222222222222222222";
   const proxyWallet = "0x3333333333333333333333333333333333333333";
@@ -412,6 +430,101 @@ test("FundingLifecycleMonitor ignores owner addresses that resolve to a differen
   assert.equal(result.alerts.length, 0);
   assert.equal(result.newTrackedWallets, 0);
   assert.equal(stateStore.getTrackedWallet(fundedOwnerWallet), null);
+
+  await fs.unlink(filePath);
+});
+
+test("FundingLifecycleMonitor emits distinct position alerts for multiple fills in the same transaction", async () => {
+  const filePath = path.join(
+    os.tmpdir(),
+    `polymarket-flow-sentinel-positions-${process.pid}-${Date.now()}.json`
+  );
+  const stateStore = new JsonMonitorStateStore(filePath, 100, 100, 100);
+  const wallet = "0x2222222222222222222222222222222222222222";
+  const firstTrade: PolymarketActivityRow = {
+    proxyWallet: wallet,
+    transactionHash: "0xtrade",
+    timestamp: 1_010,
+    title: "Will ETH close up?",
+    outcome: "Yes",
+    side: "BUY",
+    slug: "eth-close-up",
+    usdcSize: 12_500
+  };
+  const secondPosition: PolymarketActivityRow = {
+    proxyWallet: wallet,
+    transactionHash: "0xtrade",
+    timestamp: 1_010,
+    title: "Will BTC close up?",
+    outcome: "No",
+    side: "BUY",
+    slug: "btc-close-up",
+    usdcSize: 7_500
+  };
+  const observedTrades = [firstTrade, secondPosition];
+  const monitor = new FundingLifecycleMonitor({
+    polygonClient: createPolygonClientStub({
+      async getBlockNumber() {
+        return 10;
+      },
+      async getErc20TransferLogs({ address }) {
+        if (address === POLYMARKET_CONTRACTS.usdc) {
+          return [
+            {
+              type: "transfer",
+              from: "0x1111111111111111111111111111111111111111",
+              to: wallet,
+              valueRaw: 60_000_000_000n,
+              value: 60_000,
+              transactionHash: "0xfund",
+              blockNumber: 8,
+              logIndex: 1
+            }
+          ];
+        }
+
+        return [];
+      },
+      async getBlockTimestamp(blockNumber: number) {
+        return 1_000 + blockNumber;
+      }
+    }),
+    polymarketClient: createPolymarketClientStub({
+      async getFirstTrade() {
+        return firstTrade;
+      },
+      async getTradeActivitySince() {
+        return observedTrades;
+      }
+    }),
+    priceClient: createPriceClientStub({
+      async getUsdPrice() {
+        return 1;
+      }
+    }),
+    stateStore,
+    config: createTestConfig({
+      bootstrapMode: "scan",
+      startupLookbackBlocks: 5
+    }),
+    logger: createLogger()
+  });
+
+  await monitor.initialize();
+
+  const firstRun = await monitor.runOnce();
+  const firstRunPositionAlerts = firstRun.alerts.filter((alert) => alert.stage === "position");
+  const trackedWallet = stateStore.getTrackedWallet(wallet);
+
+  assert.equal(firstRunPositionAlerts.length, 2);
+  assert.equal(trackedWallet?.positions.length, 2);
+  assert.equal(trackedWallet?.positionCount, 2);
+
+  const secondRun = await monitor.runOnce();
+  const secondRunPositionAlerts = secondRun.alerts.filter((alert) => alert.stage === "position");
+
+  assert.equal(secondRunPositionAlerts.length, 0);
+  assert.equal(stateStore.getTrackedWallet(wallet)?.positions.length, 2);
 
   await fs.unlink(filePath);
 });

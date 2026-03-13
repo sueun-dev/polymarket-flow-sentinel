@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Polymarket Flow Sentinel</title>
+    <title>Flow Sentinel</title>
     <meta
       name="description"
       content="Real-time intelligence for newly funded Polygon wallets before their first Polymarket bet."
@@ -12,128 +12,266 @@
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <div class="page-shell">
-      <header class="hero">
-        <div class="hero-copy">
-          <p class="eyebrow">Polymarket Flow Sentinel</p>
-          <h1>Track fresh Polygon funding all the way to a wallet's first Polymarket bet.</h1>
-          <p class="hero-text">
-            Flow Sentinel watches large Polygon funding into wallets with no prior Polymarket
-            footprint, then follows approval signals, first use, and the exact first market bet.
-          </p>
+    <!-- Top bar -->
+    <nav class="topbar">
+      <div class="topbar-left">
+        <svg
+          class="logo-icon"
+          viewBox="0 0 24 24"
+          width="20"
+          height="20"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+        >
+          <circle cx="12" cy="12" r="10" />
+          <path d="M12 6v6l4 2" />
+        </svg>
+        <span class="logo-text">Flow Sentinel</span>
+        <div class="live-badge" id="live-badge">
+          <span class="live-dot" id="live-dot"></span>
+          <span id="live-label">Connecting</span>
         </div>
-        <section class="hero-panel">
-          <div class="live-pill">
-            <span class="live-dot" id="live-dot"></span>
-            <span id="live-label">Connecting</span>
+      </div>
+      <div class="topbar-right">
+        <div class="topbar-meta">
+          <span class="meta-item" title="이 금액 이상 입금된 지갑만 추적"
+            >Threshold <strong id="threshold-value">$0</strong></span
+          >
+          <span class="meta-divider"></span>
+          <span class="meta-item" title="블록체인 스캔 주기"
+            >Poll <strong id="interval-value">-</strong></span
+          >
+          <span class="meta-divider"></span>
+          <span class="meta-item" title="최신 블록 대비 지연 블록 수"
+            >Lag <strong id="chain-value">-</strong></span
+          >
+          <span class="meta-divider"></span>
+          <span class="meta-item" title="알림 웹훅 연결 상태"
+            >Webhook <strong id="webhook-value">-</strong></span
+          >
+        </div>
+        <button id="scan-button" class="btn btn-primary" type="button">
+          <svg
+            viewBox="0 0 24 24"
+            width="14"
+            height="14"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.5"
+          >
+            <path d="M21 12a9 9 0 11-6.2-8.6" />
+            <path d="M21 3v5h-5" />
+          </svg>
+          Scan
+        </button>
+        <button id="toggle-button" class="btn btn-ghost" type="button">Pause</button>
+      </div>
+    </nav>
+
+    <main class="main">
+      <!-- Pipeline funnel with inline wallet details -->
+      <section class="pipeline">
+        <div class="pipe-col">
+          <div class="pipe-head">
+            <div class="pipe-number" id="tracked-wallets">0</div>
+            <div class="pipe-label">Funded</div>
+            <div class="pipe-sub">$50k+ 입금된 신규 지갑</div>
           </div>
-          <div class="hero-actions">
-            <button id="scan-button" class="primary-button" type="button">Scan Now</button>
-            <button id="toggle-button" class="secondary-button" type="button">Pause Monitor</button>
+        </div>
+        <div class="pipe-arrow-col">
+          <svg
+            viewBox="0 0 24 24"
+            width="20"
+            height="20"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <path d="M5 12h14m-7-7l7 7-7 7" />
+          </svg>
+        </div>
+        <div class="pipe-col pipe-col--cyan">
+          <div class="pipe-head">
+            <div class="pipe-number pipe-number--cyan" id="deposit-hits">0</div>
+            <div class="pipe-label">Deposited</div>
+            <div class="pipe-sub">폴리마켓에 USDC 입금 완료</div>
           </div>
-          <dl class="mini-stats">
+          <div class="pipe-wallet-list" id="deposit-wallets"></div>
+        </div>
+        <div class="pipe-arrow-col">
+          <svg
+            viewBox="0 0 24 24"
+            width="20"
+            height="20"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <path d="M5 12h14m-7-7l7 7-7 7" />
+          </svg>
+        </div>
+        <div class="pipe-col pipe-col--orange">
+          <div class="pipe-head">
+            <div class="pipe-number pipe-number--orange" id="active-hits">0</div>
+            <div class="pipe-label">Active</div>
+            <div class="pipe-sub">베팅 진행 중인 지갑</div>
+          </div>
+          <div class="pipe-wallet-list" id="active-wallets"></div>
+        </div>
+        <div class="pipe-arrow-col">
+          <svg
+            viewBox="0 0 24 24"
+            width="20"
+            height="20"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <path d="M5 12h14m-7-7l7 7-7 7" />
+          </svg>
+        </div>
+        <div class="pipe-col pipe-col--red">
+          <div class="pipe-head">
+            <div class="pipe-number pipe-number--red" id="depleted-hits">0</div>
+            <div class="pipe-label">Depleted</div>
+            <div class="pipe-sub" id="last-alert">자금 소진 — 추적 종료</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Pipeline guide -->
+      <section class="guide">
+        <div class="guide-title">
+          <svg
+            viewBox="0 0 24 24"
+            width="14"
+            height="14"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <circle cx="12" cy="12" r="10" />
+            <path d="M12 16v-4m0-4h.01" />
+          </svg>
+          파이프라인 가이드
+        </div>
+        <div class="guide-steps">
+          <div class="guide-step">
+            <span class="guide-num">1</span>
             <div>
-              <dt>Funding Threshold</dt>
-              <dd id="threshold-value">$0</dd>
+              <strong>Funded</strong> — Polygon에 $50k 이상 큰 돈이 들어온 신규 지갑을 감지합니다.
+              USDC.e, USDC, USDT, DAI 등 8개 토큰을 감시합니다.
             </div>
-            <div>
-              <dt>Poll Rate</dt>
-              <dd id="interval-value">-</dd>
-            </div>
-            <div>
-              <dt>Chain Lag</dt>
-              <dd id="chain-value">-</dd>
-            </div>
-            <div>
-              <dt>Webhook</dt>
-              <dd id="webhook-value">-</dd>
-            </div>
-          </dl>
-        </section>
-      </header>
-
-      <main class="dashboard-grid">
-        <section class="summary-grid" aria-label="Summary metrics">
-          <article class="summary-card">
-            <p class="summary-label">Monitor State</p>
-            <h2 id="monitor-state">-</h2>
-            <p id="monitor-meta" class="summary-meta">Waiting for data.</p>
-          </article>
-          <article class="summary-card">
-            <p class="summary-label">Tracked Wallets</p>
-            <h2 id="tracked-wallets">0</h2>
-            <p class="summary-meta">Large fresh funding candidates under surveillance.</p>
-          </article>
-          <article class="summary-card">
-            <p class="summary-label">First Use Hits</p>
-            <h2 id="first-use-hits">0</h2>
-            <p class="summary-meta">Wallets that have started touching Polymarket.</p>
-          </article>
-          <article class="summary-card accent-card">
-            <p class="summary-label">First Bet Hits</p>
-            <h2 id="first-trade-hits">0</h2>
-            <p id="last-alert" class="summary-meta">No alerts yet.</p>
-          </article>
-        </section>
-
-        <section class="panel" aria-labelledby="status-heading">
-          <div class="panel-heading">
-            <h2 id="status-heading">Runtime Status</h2>
-            <p>RPC sync, processing range, and most recent polling result.</p>
           </div>
-          <div class="status-grid" id="status-grid"></div>
-        </section>
-
-        <section class="panel" aria-labelledby="watchlist-heading">
-          <div class="panel-heading">
-            <h2 id="watchlist-heading">Tracked Wallets</h2>
-            <p>Each card follows a wallet from funding to approval and into its first trade.</p>
+          <div class="guide-step">
+            <span class="guide-num guide-num--cyan">2</span>
+            <div>
+              <strong>Deposited</strong> — 감지된 지갑이 실제로 폴리마켓 컨트랙트(ConditionalTokens,
+              NegRisk)에 USDC를 입금한 순간을 포착합니다.
+            </div>
           </div>
-          <div id="watchlist-list" class="watchlist-list"></div>
-        </section>
-
-        <section class="panel alerts-panel" aria-labelledby="alerts-heading">
-          <div class="panel-heading">
-            <h2 id="alerts-heading">Recent Lifecycle Alerts</h2>
-            <p>Funding, first-use, and first-bet events appear here in real time.</p>
+          <div class="guide-step">
+            <span class="guide-num guide-num--orange">3</span>
+            <div>
+              <strong>Active</strong> — 지갑이 실제로 마켓에 베팅을 시작하면 모든 포지션(어떤 마켓,
+              어느 방향, 얼마)을 계속 추적합니다.
+            </div>
           </div>
-          <div id="alerts-list" class="alerts-list"></div>
-        </section>
-      </main>
-    </div>
+          <div class="guide-step">
+            <span class="guide-num guide-num--red">4</span>
+            <div>
+              <strong>Depleted</strong> — 베팅 총액이 입금액 이상이면 자금 소진으로 판단하고 추적을
+              종료합니다.
+            </div>
+          </div>
+        </div>
+      </section>
 
+      <!-- Monitor status bar -->
+      <section class="status-bar">
+        <div class="status-bar-item">
+          <span class="sbl">State</span>
+          <span class="sbv" id="monitor-state">-</span>
+        </div>
+        <div class="status-bar-item" id="monitor-meta-wrap">
+          <span class="sbl">Last Sweep</span>
+          <span class="sbv" id="monitor-meta">Waiting for data</span>
+        </div>
+        <div id="status-grid" class="status-bar-extra"></div>
+      </section>
+
+      <!-- Two-column layout: Wallets + Alerts -->
+      <div class="columns">
+        <section class="col col--wallets">
+          <div class="col-header">
+            <h2>Tracked Wallets</h2>
+            <span class="col-count" id="wallet-count">0</span>
+          </div>
+          <div class="col-desc">
+            감시 중인 모든 지갑 목록. 각 카드에서 펀딩 금액, 입금 현황, 베팅 포지션, 상태를 확인할
+            수 있습니다.
+          </div>
+          <div class="filter-bar" id="wallet-filters">
+            <button class="filter-btn active" data-filter="all" type="button">All</button>
+            <button class="filter-btn filter-btn--amber" data-filter="funded" type="button">
+              Funded
+            </button>
+            <button class="filter-btn filter-btn--cyan" data-filter="deposited" type="button">
+              Deposited
+            </button>
+            <button class="filter-btn filter-btn--orange" data-filter="active" type="button">
+              Active
+            </button>
+            <button class="filter-btn filter-btn--red" data-filter="depleted" type="button">
+              Depleted
+            </button>
+          </div>
+          <div id="watchlist-list" class="wallet-list"></div>
+        </section>
+
+        <section class="col col--alerts">
+          <div class="col-header">
+            <h2>Alerts</h2>
+            <span class="col-count" id="alert-count">0</span>
+          </div>
+          <div class="col-desc">
+            실시간 이벤트 피드. 새 펀딩, 입금, 베팅 등 모든 상태 변화가 시간순으로 기록됩니다.
+          </div>
+          <div id="alerts-list" class="alert-list"></div>
+        </section>
+      </div>
+    </main>
+
+    <!-- Templates -->
     <template id="status-item-template">
-      <div class="status-item">
-        <p class="status-label"></p>
-        <p class="status-value"></p>
+      <div class="status-bar-item">
+        <span class="sbl"></span>
+        <span class="sbv"></span>
       </div>
     </template>
 
     <template id="watch-card-template">
-      <article class="watch-card">
-        <div class="watch-header">
-          <div>
-            <p class="watch-status"></p>
-            <h3 class="watch-wallet"></h3>
-          </div>
-          <p class="watch-funded"></p>
+      <article class="wcard">
+        <div class="wcard-top">
+          <span class="wcard-badge"></span>
+          <span class="wcard-addr"></span>
+          <span class="wcard-amount"></span>
         </div>
-        <dl class="watch-details"></dl>
-        <div class="watch-links"></div>
+        <div class="wcard-grid"></div>
+        <div class="wcard-links"></div>
       </article>
     </template>
 
     <template id="alert-card-template">
-      <article class="alert-card">
-        <div class="alert-header">
-          <div>
-            <p class="alert-eyebrow"></p>
-            <h3 class="alert-title"></h3>
-          </div>
-          <p class="alert-amount"></p>
+      <article class="acard">
+        <div class="acard-top">
+          <span class="acard-badge"></span>
+          <span class="acard-title"></span>
+          <span class="acard-amount"></span>
         </div>
-        <dl class="alert-details"></dl>
-        <div class="alert-links"></div>
+        <div class="acard-grid"></div>
+        <div class="acard-links"></div>
       </article>
     </template>
 

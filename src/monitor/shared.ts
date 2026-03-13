@@ -52,6 +52,11 @@ export const IGNORED_WALLETS = new Set<string>([
   "0x0000000000000000000000000000000000000000"
 ]);
 
+export const DEPOSIT_DESTINATIONS: string[] = [
+  POLYMARKET_CONTRACTS.conditionalTokens.toLowerCase(),
+  POLYMARKET_CONTRACTS.negRiskAdapter.toLowerCase()
+];
+
 export function toIsoFromUnix(timestamp: number): string {
   return new Date(timestamp * 1_000).toISOString();
 }
@@ -72,7 +77,11 @@ export function createFundingTransferKey(transfer: PricedFundingTransfer): strin
   return `${transfer.assetAddress}:${transfer.transactionHash}:${transfer.logIndex}:${normalizeAddress(transfer.to)}`;
 }
 
-export function createEventKey(stage: PendingMonitorAlert["stage"], wallet: string, uniquePart: string): string {
+export function createEventKey(
+  stage: PendingMonitorAlert["stage"],
+  wallet: string,
+  uniquePart: string
+): string {
   return `${normalizeAddress(wallet)}:${stage}:${uniquePart}`;
 }
 
@@ -80,9 +89,18 @@ export function isEmptyCode(value: string): boolean {
   return /^0x0*$/i.test(value);
 }
 
-export function deriveWalletStatus(record: Pick<TrackedWalletRecord, "firstUse" | "firstTrade">): WalletStatus {
-  if (record.firstTrade) {
-    return "first-trade";
+export function deriveWalletStatus(
+  record: Pick<
+    TrackedWalletRecord,
+    "firstUse" | "firstTrade" | "totalDepositedUsdc" | "totalBetUsd" | "positionCount"
+  >
+): WalletStatus {
+  if (record.totalDepositedUsdc > 0 && record.totalBetUsd >= record.totalDepositedUsdc) {
+    return "depleted";
+  }
+
+  if (record.positionCount > 0 || record.firstTrade) {
+    return "active";
   }
 
   if (record.firstUse) {

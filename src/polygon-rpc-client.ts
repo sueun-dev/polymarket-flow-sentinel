@@ -1,4 +1,4 @@
-import { EVENT_SIGNATURES } from "./polymarket-address-book.js";
+import { EVENT_SIGNATURES, POLYMARKET_CONTRACTS } from "./polymarket-address-book.js";
 import { isRecord, readArray, readString } from "./runtime-guards.js";
 
 import type {
@@ -92,7 +92,9 @@ function parseRpcLogs(payload: unknown, method: string): RpcLog[] {
 
 function parseRpcBlock(payload: unknown, includeTransactions: boolean): RpcBlock {
   if (!isRecord(payload)) {
-    throw new Error(`RPC eth_getBlockByNumber result must be an object when includeTransactions=${String(includeTransactions)}.`);
+    throw new Error(
+      `RPC eth_getBlockByNumber result must be an object when includeTransactions=${String(includeTransactions)}.`
+    );
   }
 
   return payload as RpcBlock;
@@ -171,7 +173,10 @@ export class PolygonRpcClient {
   private readonly timeoutMs: number;
   private readonly fetchImpl: FetchLike;
   private requestId = 0;
-  private readonly blockCache = new Map<number, { number: number; timestamp: number; hash: string }>();
+  private readonly blockCache = new Map<
+    number,
+    { number: number; timestamp: number; hash: string }
+  >();
 
   constructor({ rpcUrl, timeoutMs, fetchImpl = fetch }: PolygonRpcClientOptions) {
     this.rpcUrl = rpcUrl;
@@ -187,10 +192,14 @@ export class PolygonRpcClient {
       method,
       params
     };
-    const response = parseRpcEnvelope<T>(await fetchJson(this.rpcUrl, payload, this.timeoutMs, this.fetchImpl));
+    const response = parseRpcEnvelope<T>(
+      await fetchJson(this.rpcUrl, payload, this.timeoutMs, this.fetchImpl)
+    );
 
     if (response.error) {
-      throw new Error(`RPC ${method} failed: ${response.error.message ?? JSON.stringify(response.error)}`);
+      throw new Error(
+        `RPC ${method} failed: ${response.error.message ?? JSON.stringify(response.error)}`
+      );
     }
 
     return response.result as T;
@@ -204,14 +213,19 @@ export class PolygonRpcClient {
     return this.rpc<string>("eth_getCode", [address, "latest"]);
   }
 
-  async getBlock(blockNumber: number): Promise<{ number: number; timestamp: number; hash: string }> {
+  async getBlock(
+    blockNumber: number
+  ): Promise<{ number: number; timestamp: number; hash: string }> {
     const cached = this.blockCache.get(blockNumber);
 
     if (cached) {
       return cached;
     }
 
-    const block = parseRpcBlock(await this.rpc<unknown>("eth_getBlockByNumber", [numberToHex(blockNumber), false]), false);
+    const block = parseRpcBlock(
+      await this.rpc<unknown>("eth_getBlockByNumber", [numberToHex(blockNumber), false]),
+      false
+    );
     const parsed = {
       number: hexToNumber(block.number),
       timestamp: hexToNumber(block.timestamp),
@@ -236,7 +250,10 @@ export class PolygonRpcClient {
       transactionIndex: number;
     }>;
   }> {
-    const block = parseRpcBlock(await this.rpc<unknown>("eth_getBlockByNumber", [numberToHex(blockNumber), true]), true);
+    const block = parseRpcBlock(
+      await this.rpc<unknown>("eth_getBlockByNumber", [numberToHex(blockNumber), true]),
+      true
+    );
     const transactions = Array.isArray(block.transactions) ? block.transactions : [];
 
     return {
@@ -270,21 +287,6 @@ export class PolygonRpcClient {
     ]);
 
     return parseRpcLogs(rawLogs, "eth_getLogs");
-  }
-
-  async getUsdcTransferLogs({
-    fromBlock,
-    toBlock,
-    address
-  }: Omit<GetTransferLogsInput, "decimals">): Promise<DecodedTransferLog[]> {
-    const logs = await this.getLogs({
-      fromBlock,
-      toBlock,
-      address,
-      topics: [EVENT_SIGNATURES.erc20Transfer]
-    });
-
-    return logs.map((log) => decodeErc20TransferLog(log));
   }
 
   async getErc20TransferLogs({
@@ -334,7 +336,40 @@ export class PolygonRpcClient {
     return logs.map((log) => decodeErc1155ApprovalForAllLog(log));
   }
 
-  async getNativeTransfers({ fromBlock, toBlock }: { fromBlock: number; toBlock: number }): Promise<NativeTransfer[]> {
+  async getUsdcTransfersToAddresses({
+    fromBlock,
+    toBlock,
+    destinations
+  }: {
+    fromBlock: number;
+    toBlock: number;
+    destinations: string[];
+  }): Promise<DecodedTransferLog[]> {
+    const results: DecodedTransferLog[] = [];
+
+    for (const destination of destinations) {
+      const logs = await this.getLogs({
+        fromBlock,
+        toBlock,
+        address: POLYMARKET_CONTRACTS.usdc,
+        topics: [EVENT_SIGNATURES.erc20Transfer, null, addressTopic(destination)]
+      });
+
+      for (const log of logs) {
+        results.push(decodeErc20TransferLog(log));
+      }
+    }
+
+    return results;
+  }
+
+  async getNativeTransfers({
+    fromBlock,
+    toBlock
+  }: {
+    fromBlock: number;
+    toBlock: number;
+  }): Promise<NativeTransfer[]> {
     const transfers: NativeTransfer[] = [];
 
     for (let blockNumber = fromBlock; blockNumber <= toBlock; blockNumber += 1) {

@@ -1,4 +1,5 @@
 import { formatMonitorAlertMessage, publishWebhookAlert } from "./alert-publisher.js";
+import { processDepositSignals } from "./monitor/deposit-stage.js";
 import { processFundingTransfers } from "./monitor/funding-stage.js";
 import { processOnChainUseSignals } from "./monitor/first-use-stage.js";
 import { refreshTrackedWallets } from "./monitor/first-trade-stage.js";
@@ -112,7 +113,9 @@ export class FundingLifecycleMonitor {
         bootstrapped: true
       });
       await this.stateStore.save();
-      this.logger.info(`Bootstrapped at Polygon block ${latestBlock}. New funding alerts start on the next poll.`);
+      this.logger.info(
+        `Bootstrapped at Polygon block ${latestBlock}. New funding alerts start on the next poll.`
+      );
       return {
         alerts: [],
         bootstrapped: true,
@@ -138,8 +141,9 @@ export class FundingLifecycleMonitor {
       const toBlock = Math.min(nextBlock + this.config.blockBatchSize - 1, latestBlock);
       const fundingResult = await processFundingTransfers(stageDependencies, nextBlock, toBlock);
       const chainUseResult = await processOnChainUseSignals(stageDependencies, nextBlock, toBlock);
+      const depositResult = await processDepositSignals(stageDependencies, nextBlock, toBlock);
 
-      alerts.push(...fundingResult.alerts, ...chainUseResult.alerts);
+      alerts.push(...fundingResult.alerts, ...chainUseResult.alerts, ...depositResult.alerts);
       newTrackedWallets += fundingResult.newTrackedWallets;
       processedBlocks += toBlock - nextBlock + 1;
       this.stateStore.setLastProcessedBlock(toBlock);
