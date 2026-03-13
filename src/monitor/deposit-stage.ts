@@ -26,9 +26,6 @@ export async function processDepositSignals(
 
   const minDeposit = dependencies.config.minDepositUsd;
 
-  // Accumulate deposit totals per wallet within this batch
-  const batchTotals = new Map<string, number>();
-
   for (const transfer of transfers.sort(sortByBlockAndIndex)) {
     const wallet = normalizeAddress(transfer.from);
 
@@ -52,12 +49,34 @@ export async function processDepositSignals(
 
     // New wallet depositing to Polymarket — only register if cumulative deposits >= threshold
     if (!record) {
-      const runningTotal = (batchTotals.get(wallet) ?? 0) + deposit.amountUsdc;
-      batchTotals.set(wallet, runningTotal);
+      // Use persistent pendingFunding to accumulate across batches
+      const pending = dependencies.stateStore.getPendingFunding(wallet);
+      const runningTotal = (pending?.totalUsd ?? 0) + deposit.amountUsdc;
 
       if (runningTotal < minDeposit) {
+        dependencies.stateStore.upsertPendingFunding(wallet, {
+          wallet,
+          totalUsd: runningTotal,
+          transferCount: (pending?.transferCount ?? 0) + 1,
+          firstSeenTimestamp: pending?.firstSeenTimestamp ?? timestamp,
+          latestTransfer: {
+            assetSymbol: "USDC.e",
+            assetAddress: DEPOSIT_DESTINATIONS[0]!,
+            amountToken: deposit.amountUsdc,
+            amountUsd: deposit.amountUsdc,
+            from: wallet,
+            transactionHash: deposit.transactionHash,
+            blockNumber: deposit.blockNumber,
+            logIndex: deposit.logIndex,
+            timestamp,
+            timestampIso: toIsoFromUnix(timestamp)
+          }
+        });
         continue;
       }
+
+      // Threshold crossed — remove pending and register
+      dependencies.stateStore.removePendingFunding(wallet);
       const walletCode = await dependencies.polygonClient.getCode(wallet);
       const walletKind: WalletKind = isEmptyCode(walletCode) ? "EOA" : "Contract";
 
