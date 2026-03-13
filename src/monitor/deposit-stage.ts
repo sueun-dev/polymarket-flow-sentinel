@@ -1,7 +1,9 @@
-import type { DepositRecord, PublishedMonitorAlert } from "../types.js";
+import type { DepositRecord, FundingRecord, PublishedMonitorAlert, WalletKind } from "../types.js";
 import {
   DEPOSIT_DESTINATIONS,
+  IGNORED_WALLETS,
   deriveWalletStatus,
+  isEmptyCode,
   normalizeAddress,
   sortByBlockAndIndex,
   toIsoFromUnix
@@ -12,7 +14,7 @@ export async function processDepositSignals(
   dependencies: MonitorStageDependencies,
   fromBlock: number,
   toBlock: number
-): Promise<{ alerts: PublishedMonitorAlert[] }> {
+): Promise<{ newTrackedWallets: number; alerts: PublishedMonitorAlert[] }> {
   const transfers = await dependencies.polygonClient.getUsdcTransfersToAddresses({
     fromBlock,
     toBlock,
@@ -20,20 +22,21 @@ export async function processDepositSignals(
   });
 
   const alerts: PublishedMonitorAlert[] = [];
+  let newTrackedWallets = 0;
+
+  const minDeposit = dependencies.config.minDepositUsd;
+
+  // Accumulate deposit totals per wallet within this batch
+  const batchTotals = new Map<string, number>();
 
   for (const transfer of transfers.sort(sortByBlockAndIndex)) {
     const wallet = normalizeAddress(transfer.from);
-    const record = dependencies.stateStore.getTrackedWallet(wallet);
 
-    if (!record) {
+    if (!wallet || IGNORED_WALLETS.has(wallet)) {
       continue;
     }
 
     const timestamp = await dependencies.polygonClient.getBlockTimestamp(transfer.blockNumber);
-
-    if (timestamp < record.firstFunding.timestamp) {
-      continue;
-    }
 
     const deposit: DepositRecord = {
       amountUsdc: transfer.value,
@@ -44,6 +47,76 @@ export async function processDepositSignals(
       timestamp,
       timestampIso: toIsoFromUnix(timestamp)
     };
+
+    let record = dependencies.stateStore.getTrackedWallet(wallet);
+
+    // New wallet depositing to Polymarket — only register if cumulative deposits >= threshold
+    if (!record) {
+      const runningTotal = (batchTotals.get(wallet) ?? 0) + deposit.amountUsdc;
+      batchTotals.set(wallet, runningTotal);
+
+      if (runningTotal < minDeposit) {
+        continue;
+      }
+      const walletCode = await dependencies.polygonClient.getCode(wallet);
+      const walletKind: WalletKind = isEmptyCode(walletCode) ? "EOA" : "Contract";
+
+      const canonicalProfileWallet =
+        await dependencies.polymarketClient.getCanonicalProfileWallet(wallet);
+      const aliases: string[] = [];
+      if (
+        canonicalProfileWallet &&
+        normalizeAddress(canonicalProfileWallet) !== normalizeAddress(wallet)
+      ) {
+        aliases.push(normalizeAddress(canonicalProfileWallet));
+      }
+
+      // Use the deposit as the initial "funding" record
+      const initialFunding: FundingRecord = {
+        assetSymbol: "USDC.e",
+        assetAddress: DEPOSIT_DESTINATIONS[0]!,
+        amountToken: deposit.amountUsdc,
+        amountUsd: deposit.amountUsdc,
+        from: wallet,
+        transactionHash: deposit.transactionHash,
+        blockNumber: deposit.blockNumber,
+        logIndex: deposit.logIndex,
+        timestamp: deposit.timestamp,
+        timestampIso: deposit.timestampIso
+      };
+
+      dependencies.stateStore.upsertTrackedWallet(wallet, () => ({
+        wallet,
+        walletKind,
+        status: "funded",
+        aliases,
+        totalFundedUsd: deposit.amountUsdc,
+        fundingCount: 1,
+        firstFunding: initialFunding,
+        latestFunding: initialFunding,
+        firstUse: null,
+        firstTrade: null,
+        lastCheckedAt: null,
+        totalDepositedUsdc: 0,
+        depositCount: 0,
+        firstDeposit: null,
+        latestDeposit: null,
+        positions: [],
+        totalBetUsd: 0,
+        positionCount: 0
+      }));
+
+      record = dependencies.stateStore.getTrackedWallet(wallet);
+      newTrackedWallets += 1;
+    }
+
+    if (!record) {
+      continue;
+    }
+
+    if (record.firstFunding && timestamp < record.firstFunding.timestamp) {
+      continue;
+    }
 
     dependencies.stateStore.upsertTrackedWallet(wallet, (current) => {
       if (!current) {
@@ -87,5 +160,5 @@ export async function processDepositSignals(
     }
   }
 
-  return { alerts };
+  return { newTrackedWallets, alerts };
 }

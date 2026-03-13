@@ -159,7 +159,7 @@ export class MonitorRuntime extends EventEmitter {
     const recentAlerts = this.stateStore.getRecentAlerts(this.config.maxRecentAlerts);
     const monitorStatus = this.stateStore.getMonitorStatus();
     const walletStats = this.stateStore.getTrackedWalletStats();
-    const watchlist = this.stateStore.listTrackedWallets().slice(0, 50);
+    const watchlist = this.stateStore.listTrackedWallets();
 
     return {
       monitor: {

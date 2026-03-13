@@ -139,12 +139,15 @@ export class FundingLifecycleMonitor {
 
     while (nextBlock <= latestBlock) {
       const toBlock = Math.min(nextBlock + this.config.blockBatchSize - 1, latestBlock);
+      // Deposit stage runs FIRST — it's the primary entry point that registers
+      // wallets actually depositing into Polymarket contracts
+      const depositResult = await processDepositSignals(stageDependencies, nextBlock, toBlock);
+      // Funding stage only enriches already-tracked wallets with additional funding data
       const fundingResult = await processFundingTransfers(stageDependencies, nextBlock, toBlock);
       const chainUseResult = await processOnChainUseSignals(stageDependencies, nextBlock, toBlock);
-      const depositResult = await processDepositSignals(stageDependencies, nextBlock, toBlock);
 
-      alerts.push(...fundingResult.alerts, ...chainUseResult.alerts, ...depositResult.alerts);
-      newTrackedWallets += fundingResult.newTrackedWallets;
+      alerts.push(...depositResult.alerts, ...fundingResult.alerts, ...chainUseResult.alerts);
+      newTrackedWallets += depositResult.newTrackedWallets;
       processedBlocks += toBlock - nextBlock + 1;
       this.stateStore.setLastProcessedBlock(toBlock);
       this.stateStore.setBootstrapped(true);

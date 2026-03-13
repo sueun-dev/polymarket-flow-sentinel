@@ -22,11 +22,6 @@ export interface SortableBlockPosition {
   logIndex: number;
 }
 
-export interface FundingRegistrationResult {
-  tracked: boolean;
-  alert: PublishedMonitorAlert | null;
-}
-
 export interface TradeSummary {
   count: number;
   usd: number;

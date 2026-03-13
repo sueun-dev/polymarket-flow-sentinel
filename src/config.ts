@@ -6,6 +6,7 @@ const DEFAULTS: Omit<MonitorConfig, "once"> = {
   dataApiBaseUrl: "https://data-api.polymarket.com",
   polygonRpcUrl: "https://polygon.drpc.org",
   minFundingUsd: 50_000,
+  minDepositUsd: 10_000,
   minTradeUsd: 0,
   pollIntervalMs: 5_000,
   startupLookbackBlocks: 256,
@@ -67,6 +68,7 @@ export function loadConfig(argv: string[] = process.argv.slice(2)): MonitorConfi
     dataApiBaseUrl: process.env["POLYMARKET_DATA_API_BASE_URL"] ?? DEFAULTS.dataApiBaseUrl,
     polygonRpcUrl: process.env["POLYGON_RPC_URL"] ?? DEFAULTS.polygonRpcUrl,
     minFundingUsd: readNumber("POLYMARKET_MIN_FUNDING_USD", DEFAULTS.minFundingUsd),
+    minDepositUsd: readNumber("POLYMARKET_MIN_DEPOSIT_USD", DEFAULTS.minDepositUsd),
     minTradeUsd: readNumber("POLYMARKET_MIN_TRADE_USD", DEFAULTS.minTradeUsd, { allowZero: true }),
     pollIntervalMs: readNumber("POLYMARKET_POLL_INTERVAL_MS", DEFAULTS.pollIntervalMs),
     startupLookbackBlocks: readNumber(

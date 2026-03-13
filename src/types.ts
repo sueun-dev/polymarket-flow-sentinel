@@ -15,6 +15,7 @@ export interface MonitorConfig {
   dataApiBaseUrl: string;
   polygonRpcUrl: string;
   minFundingUsd: number;
+  minDepositUsd: number;
   minTradeUsd: number;
   pollIntervalMs: number;
   startupLookbackBlocks: number;

@@ -33,6 +33,7 @@ function createTestConfig(overrides: Partial<MonitorConfig> = {}): MonitorConfig
     dataApiBaseUrl: "https://data-api.polymarket.com",
     polygonRpcUrl: "https://polygon.drpc.org",
     minFundingUsd: 50_000,
+    minDepositUsd: 10_000,
     minTradeUsd: 0,
     pollIntervalMs: 1_000,
     startupLookbackBlocks: 50,
@@ -270,13 +271,14 @@ test("FundingLifecycleMonitor bootstraps to the latest block in skip mode", asyn
   await fs.unlink(filePath);
 });
 
-test("FundingLifecycleMonitor records funding, first use, and first trade", async () => {
+test("FundingLifecycleMonitor records deposit, funding enrichment, first use, and first trade", async () => {
   const filePath = path.join(
     os.tmpdir(),
     `polymarket-flow-sentinel-lifecycle-${process.pid}-${Date.now()}.json`
   );
   const stateStore = new JsonMonitorStateStore(filePath, 100, 100, 100);
   const wallet = "0x2222222222222222222222222222222222222222";
+  const conditionalTokens = POLYMARKET_CONTRACTS.conditionalTokens.toLowerCase();
   const trade: PolymarketActivityRow = {
     proxyWallet: wallet,
     transactionHash: "0xtrade",
@@ -287,16 +289,28 @@ test("FundingLifecycleMonitor records funding, first use, and first trade", asyn
     slug: "eth-close-up",
     usdcSize: 12_500
   };
-  let firstActivityChecks = 0;
   const monitor = new FundingLifecycleMonitor({
     polygonClient: createPolygonClientStub({
       async getBlockNumber() {
         return 10;
       },
-      async getErc20TransferLogs({ fromBlock, toBlock, address }) {
-        assert.equal(fromBlock, 6);
-        assert.equal(toBlock, 10);
-
+      async getUsdcTransfersToAddresses() {
+        // Wallet deposits USDC into Polymarket ConditionalTokens — primary entry point
+        return [
+          {
+            type: "transfer" as const,
+            from: wallet,
+            to: conditionalTokens,
+            valueRaw: 60_000_000_000n,
+            value: 60_000,
+            transactionHash: "0xdeposit",
+            blockNumber: 7,
+            logIndex: 0
+          }
+        ];
+      },
+      async getErc20TransferLogs({ address }) {
+        // Funding enrichment: wallet received USDC from another address
         if (address === POLYMARKET_CONTRACTS.usdc) {
           return [
             {
@@ -319,7 +333,7 @@ test("FundingLifecycleMonitor records funding, first use, and first trade", asyn
           {
             type: "approval",
             owner: wallet,
-            spender: POLYMARKET_CONTRACTS.conditionalTokens.toLowerCase(),
+            spender: conditionalTokens,
             valueRaw: 1n,
             value: 0.000001,
             transactionHash: "0xapprove",
@@ -333,10 +347,6 @@ test("FundingLifecycleMonitor records funding, first use, and first trade", asyn
       }
     }),
     polymarketClient: createPolymarketClientStub({
-      async getFirstActivity() {
-        firstActivityChecks += 1;
-        return null;
-      },
       async getFirstTrade() {
         return trade;
       },
@@ -363,10 +373,9 @@ test("FundingLifecycleMonitor records funding, first use, and first trade", asyn
   const result = await monitor.runOnce();
   const trackedWallet = stateStore.getTrackedWallet(wallet);
 
-  assert.equal(firstActivityChecks, 1);
-  assert.ok(result.alerts.length >= 3);
+  assert.ok(result.alerts.length >= 2);
   assert.ok(trackedWallet);
-  assert.equal(trackedWallet.totalFundedUsd, 60_000);
+  assert.equal(trackedWallet.totalDepositedUsdc, 60_000);
   assert.equal(trackedWallet.firstUse?.kind, "USDC approval to CTF");
   assert.equal(trackedWallet.firstTrade?.usdSize, 12_500);
   assert.equal(trackedWallet.status, "active");
@@ -376,36 +385,33 @@ test("FundingLifecycleMonitor records funding, first use, and first trade", asyn
   await fs.unlink(filePath);
 });
 
-test("FundingLifecycleMonitor tracks owner addresses that resolve to a different Polymarket proxy wallet as aliases", async () => {
+test("FundingLifecycleMonitor tracks depositing wallets and resolves aliases via Polymarket profile", async () => {
   const filePath = path.join(
     os.tmpdir(),
     `polymarket-flow-sentinel-owner-alias-${process.pid}-${Date.now()}.json`
   );
   const stateStore = new JsonMonitorStateStore(filePath, 100, 100, 100);
-  const fundedOwnerWallet = "0x2222222222222222222222222222222222222222";
+  const depositorWallet = "0x2222222222222222222222222222222222222222";
   const proxyWallet = "0x3333333333333333333333333333333333333333";
+  const conditionalTokens = POLYMARKET_CONTRACTS.conditionalTokens.toLowerCase();
   const monitor = new FundingLifecycleMonitor({
     polygonClient: createPolygonClientStub({
       async getBlockNumber() {
         return 10;
       },
-      async getErc20TransferLogs({ address }) {
-        if (address === POLYMARKET_CONTRACTS.usdc) {
-          return [
-            {
-              type: "transfer",
-              from: "0x1111111111111111111111111111111111111111",
-              to: fundedOwnerWallet,
-              valueRaw: 60_000_000_000n,
-              value: 60_000,
-              transactionHash: "0xfund",
-              blockNumber: 8,
-              logIndex: 1
-            }
-          ];
-        }
-
-        return [];
+      async getUsdcTransfersToAddresses() {
+        return [
+          {
+            type: "transfer" as const,
+            from: depositorWallet,
+            to: conditionalTokens,
+            valueRaw: 60_000_000_000n,
+            value: 60_000,
+            transactionHash: "0xdeposit",
+            blockNumber: 8,
+            logIndex: 1
+          }
+        ];
       },
       async getBlockTimestamp(blockNumber: number) {
         return 1_000 + blockNumber;
@@ -413,7 +419,7 @@ test("FundingLifecycleMonitor tracks owner addresses that resolve to a different
     }),
     polymarketClient: createPolymarketClientStub({
       async getCanonicalProfileWallet(wallet: string) {
-        return wallet === fundedOwnerWallet ? proxyWallet : null;
+        return wallet === depositorWallet ? proxyWallet : null;
       }
     }),
     priceClient: createPriceClientStub(),
@@ -429,10 +435,10 @@ test("FundingLifecycleMonitor tracks owner addresses that resolve to a different
   const result = await monitor.runOnce();
 
   assert.equal(result.newTrackedWallets, 1);
-  const tracked = stateStore.getTrackedWallet(fundedOwnerWallet);
+  const tracked = stateStore.getTrackedWallet(depositorWallet);
   assert.ok(tracked);
   assert.deepEqual(tracked.aliases, [proxyWallet]);
-  assert.equal(tracked.totalFundedUsd, 60_000);
+  assert.equal(tracked.totalDepositedUsdc, 60_000);
 
   await fs.unlink(filePath);
 });
@@ -444,6 +450,7 @@ test("FundingLifecycleMonitor emits distinct position alerts for multiple fills 
   );
   const stateStore = new JsonMonitorStateStore(filePath, 100, 100, 100);
   const wallet = "0x2222222222222222222222222222222222222222";
+  const conditionalTokens = POLYMARKET_CONTRACTS.conditionalTokens.toLowerCase();
   const firstTrade: PolymarketActivityRow = {
     proxyWallet: wallet,
     transactionHash: "0xtrade",
@@ -470,23 +477,20 @@ test("FundingLifecycleMonitor emits distinct position alerts for multiple fills 
       async getBlockNumber() {
         return 10;
       },
-      async getErc20TransferLogs({ address }) {
-        if (address === POLYMARKET_CONTRACTS.usdc) {
-          return [
-            {
-              type: "transfer",
-              from: "0x1111111111111111111111111111111111111111",
-              to: wallet,
-              valueRaw: 60_000_000_000n,
-              value: 60_000,
-              transactionHash: "0xfund",
-              blockNumber: 8,
-              logIndex: 1
-            }
-          ];
-        }
-
-        return [];
+      async getUsdcTransfersToAddresses() {
+        // Wallet deposits to Polymarket — triggers tracking
+        return [
+          {
+            type: "transfer" as const,
+            from: wallet,
+            to: conditionalTokens,
+            valueRaw: 60_000_000_000n,
+            value: 60_000,
+            transactionHash: "0xdeposit",
+            blockNumber: 7,
+            logIndex: 0
+          }
+        ];
       },
       async getBlockTimestamp(blockNumber: number) {
         return 1_000 + blockNumber;
