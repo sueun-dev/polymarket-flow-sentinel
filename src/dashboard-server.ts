@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { createFlowSentinelApp } from "./create-sentinel-app.js";
+import { resolvePublicAssetPath } from "./static-asset-path.js";
 
 import type { MonitorSnapshot, PublishedMonitorAlert } from "./types.js";
 
@@ -44,11 +45,9 @@ async function serveStatic(
   response: ServerResponse<IncomingMessage>,
   headOnly = false
 ): Promise<void> {
-  const normalizedPath =
-    requestPath === "/" ? "/index.html" : requestPath === "/favicon.ico" ? "/favicon.svg" : requestPath;
-  const resolvedPath = path.resolve(publicDir, `.${normalizedPath}`);
+  const resolvedPath = resolvePublicAssetPath(publicDir, requestPath);
 
-  if (!resolvedPath.startsWith(publicDir)) {
+  if (!resolvedPath) {
     sendJson(response, 403, { error: "Forbidden" }, headOnly);
     return;
   }
@@ -56,10 +55,16 @@ async function serveStatic(
   try {
     const body = await fs.readFile(resolvedPath);
     const contentType = CONTENT_TYPES[path.extname(resolvedPath)] ?? "application/octet-stream";
+    const cachePath =
+      requestPath === "/"
+        ? "/index.html"
+        : requestPath === "/favicon.ico"
+          ? "/favicon.svg"
+          : requestPath;
 
     response.writeHead(200, {
       "content-type": contentType,
-      "cache-control": normalizedPath === "/index.html" ? "no-cache" : "public, max-age=60"
+      "cache-control": cachePath === "/index.html" ? "no-cache" : "public, max-age=60"
     });
     response.end(headOnly ? undefined : body);
   } catch (error: unknown) {
@@ -77,7 +82,10 @@ function createSseBroker(runtime: RuntimeBrokerTarget): {
 } {
   const clients = new Set<ServerResponse<IncomingMessage>>();
 
-  function broadcast(event: "snapshot" | "alert", payload: MonitorSnapshot | PublishedMonitorAlert): void {
+  function broadcast(
+    event: "snapshot" | "alert",
+    payload: MonitorSnapshot | PublishedMonitorAlert
+  ): void {
     const body = `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`;
 
     for (const client of clients) {

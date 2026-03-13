@@ -1,4 +1,10 @@
-import { isRecord, readNumber, readOptionalNumber, readOptionalString, readString } from "./runtime-guards.js";
+import {
+  isRecord,
+  readNumber,
+  readOptionalNumber,
+  readOptionalString,
+  readString
+} from "./runtime-guards.js";
 
 import type { ActivityQuery, FetchLike, PolymarketActivityRow } from "./types.js";
 
@@ -12,7 +18,11 @@ interface PolymarketDataClientOptions {
   fetchImpl?: FetchLike;
 }
 
-function buildUrl(baseUrl: string, pathname: string, query: Record<string, string | number | undefined>): URL {
+function buildUrl(
+  baseUrl: string,
+  pathname: string,
+  query: Record<string, string | number | undefined>
+): URL {
   const url = new URL(pathname, baseUrl);
 
   for (const [key, value] of Object.entries(query)) {
@@ -49,7 +59,11 @@ async function fetchJson(url: URL, timeoutMs: number, fetchImpl: FetchLike): Pro
   }
 }
 
-async function fetchOptionalJson(url: URL, timeoutMs: number, fetchImpl: FetchLike): Promise<unknown | null> {
+async function fetchOptionalJson(
+  url: URL,
+  timeoutMs: number,
+  fetchImpl: FetchLike
+): Promise<unknown | null> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -131,12 +145,18 @@ export function normalizeWallet(wallet: string | null | undefined): string {
   return (wallet ?? "").toLowerCase();
 }
 
-export function getTradeUsdSize(trade: Pick<PolymarketActivityRow, "usdcSize" | "size" | "price">): number {
+export function getTradeUsdSize(
+  trade: Pick<PolymarketActivityRow, "usdcSize" | "size" | "price">
+): number {
   if (typeof trade.usdcSize === "number" && Number.isFinite(trade.usdcSize)) {
     return trade.usdcSize;
   }
 
-  if (typeof trade.size === "number" && Number.isFinite(trade.size) && typeof trade.price === "number") {
+  if (
+    typeof trade.size === "number" &&
+    Number.isFinite(trade.size) &&
+    typeof trade.price === "number"
+  ) {
     return trade.size * trade.price;
   }
 
@@ -183,7 +203,9 @@ export class PolymarketDataClient {
       return null;
     }
 
-    const proxyWallet = normalizeWallet(readOptionalString(payload["proxyWallet"], "publicProfile.proxyWallet"));
+    const proxyWallet = normalizeWallet(
+      readOptionalString(payload["proxyWallet"], "publicProfile.proxyWallet")
+    );
     const canonicalWallet = proxyWallet || null;
     this.profileWalletCache.set(normalizedWallet, canonicalWallet);
     if (canonicalWallet) {
@@ -240,7 +262,10 @@ export class PolymarketDataClient {
     return rows[0] ?? null;
   }
 
-  async getTradeActivitySince(wallet: string, startTimestamp: number): Promise<PolymarketActivityRow[]> {
+  async getTradeActivitySince(
+    wallet: string,
+    startTimestamp: number
+  ): Promise<PolymarketActivityRow[]> {
     const rows: PolymarketActivityRow[] = [];
 
     for (let page = 0; page < this.activityPageCount; page += 1) {

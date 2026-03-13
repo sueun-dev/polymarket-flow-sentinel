@@ -25,7 +25,11 @@ const DEFAULTS: Omit<MonitorConfig, "once"> = {
   port: 3000
 };
 
-function readNumber(name: string, fallback: number, { allowZero = false }: { allowZero?: boolean } = {}): number {
+function readNumber(
+  name: string,
+  fallback: number,
+  { allowZero = false }: { allowZero?: boolean } = {}
+): number {
   const raw = process.env[name];
 
   if (!raw) {
@@ -35,7 +39,9 @@ function readNumber(name: string, fallback: number, { allowZero = false }: { all
   const value = Number(raw);
 
   if (!Number.isFinite(value) || value < 0 || (!allowZero && value === 0)) {
-    throw new Error(`Environment variable ${name} must be ${allowZero ? "a non-negative" : "a positive"} number.`);
+    throw new Error(
+      `Environment variable ${name} must be ${allowZero ? "a non-negative" : "a positive"} number.`
+    );
   }
 
   return value;
@@ -62,7 +68,10 @@ export function loadConfig(argv: string[] = process.argv.slice(2)): MonitorConfi
     minFundingUsd: readNumber("POLYMARKET_MIN_FUNDING_USD", DEFAULTS.minFundingUsd),
     minTradeUsd: readNumber("POLYMARKET_MIN_TRADE_USD", DEFAULTS.minTradeUsd, { allowZero: true }),
     pollIntervalMs: readNumber("POLYMARKET_POLL_INTERVAL_MS", DEFAULTS.pollIntervalMs),
-    startupLookbackBlocks: readNumber("POLYMARKET_STARTUP_LOOKBACK_BLOCKS", DEFAULTS.startupLookbackBlocks),
+    startupLookbackBlocks: readNumber(
+      "POLYMARKET_STARTUP_LOOKBACK_BLOCKS",
+      DEFAULTS.startupLookbackBlocks
+    ),
     blockBatchSize: readNumber("POLYMARKET_BLOCK_BATCH_SIZE", DEFAULTS.blockBatchSize),
     activityPageSize: readNumber("POLYMARKET_ACTIVITY_PAGE_SIZE", DEFAULTS.activityPageSize),
     activityPageCount: readNumber("POLYMARKET_ACTIVITY_PAGE_COUNT", DEFAULTS.activityPageCount),

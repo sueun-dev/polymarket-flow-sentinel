@@ -39,14 +39,38 @@ export function formatMonitorAlertMessage(alert: PendingMonitorAlert): string {
       .join("\n");
   }
 
+  if (alert.stage === "first-trade") {
+    return [
+      `[POLYMARKET FIRST TRADE] ${formatUsd(alert.tradeUsd)}`,
+      `Wallet: ${shortWallet(alert.wallet)}`,
+      `Market: ${alert.title}`,
+      `Outcome: ${alert.outcome || "-"}`,
+      `Side: ${alert.side || "-"}`,
+      `Tracked funding: ${formatUsd(alert.fundedUsd)}`,
+      `Observed trade volume since funding: ${formatUsd(alert.observedTradeUsd)}`,
+      `Tx: https://polygonscan.com/tx/${alert.transactionHash}`
+    ].join("\n");
+  }
+
+  if (alert.stage === "deposit") {
+    return [
+      `[POLYMARKET DEPOSIT] ${formatUsd(alert.amountUsdc)}`,
+      `Wallet: ${shortWallet(alert.wallet)}`,
+      `Total deposited: ${formatUsd(alert.totalDepositedUsdc)}`,
+      `Tracked funding: ${formatUsd(alert.fundedUsd)}`,
+      `Destination: ${shortWallet(alert.destination)}`,
+      `Tx: https://polygonscan.com/tx/${alert.transactionHash}`
+    ].join("\n");
+  }
+
   return [
-    `[POLYMARKET FIRST TRADE] ${formatUsd(alert.tradeUsd)}`,
+    `[POLYMARKET POSITION] ${formatUsd(alert.usdSize)}`,
     `Wallet: ${shortWallet(alert.wallet)}`,
     `Market: ${alert.title}`,
     `Outcome: ${alert.outcome || "-"}`,
     `Side: ${alert.side || "-"}`,
+    `Total bet: ${formatUsd(alert.totalBetUsd)}`,
     `Tracked funding: ${formatUsd(alert.fundedUsd)}`,
-    `Observed trade volume since funding: ${formatUsd(alert.observedTradeUsd)}`,
     `Tx: https://polygonscan.com/tx/${alert.transactionHash}`
   ].join("\n");
 }

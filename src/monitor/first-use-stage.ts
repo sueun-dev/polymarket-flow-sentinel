@@ -66,7 +66,10 @@ export async function processOnChainUseSignals(
   const alerts: PublishedMonitorAlert[] = [];
 
   for (const approval of usdcApprovals.sort(sortByBlockAndIndex)) {
-    if (!FIRST_USE_CONTRACTS.usdcApprovalSpenders.includes(approval.spender) || approval.value <= 0) {
+    if (
+      !FIRST_USE_CONTRACTS.usdcApprovalSpenders.includes(approval.spender) ||
+      approval.value <= 0
+    ) {
       continue;
     }
 
@@ -111,7 +114,9 @@ export async function processOnChainUseSignals(
       continue;
     }
 
-    const timestamp = await dependencies.polygonClient.getBlockTimestamp(approvalForAll.blockNumber);
+    const timestamp = await dependencies.polygonClient.getBlockTimestamp(
+      approvalForAll.blockNumber
+    );
 
     if (timestamp < record.firstFunding.timestamp) {
       continue;

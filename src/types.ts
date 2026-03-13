@@ -1,7 +1,7 @@
 export type FetchLike = typeof fetch;
 export type BootstrapMode = "skip" | "scan";
 export type WalletKind = "EOA" | "Contract";
-export type WalletStatus = "funded" | "first-use" | "first-trade";
+export type WalletStatus = "funded" | "first-use" | "first-trade" | "active" | "depleted";
 export type ActivitySortDirection = "ASC" | "DESC";
 export type PriceKind = "stable" | "token" | "native";
 
@@ -170,6 +170,27 @@ export interface ActivityQuery {
   sortDirection?: ActivitySortDirection;
 }
 
+export interface DepositRecord {
+  amountUsdc: number;
+  destination: string;
+  transactionHash: string;
+  blockNumber: number;
+  logIndex: number;
+  timestamp: number;
+  timestampIso: string;
+}
+
+export interface PositionRecord {
+  title: string;
+  outcome: string;
+  side: string;
+  marketSlug: string;
+  usdSize: number;
+  transactionHash: string;
+  timestamp: number;
+  timestampIso: string;
+}
+
 export interface FirstTradeRecord {
   title: string;
   outcome: string;
@@ -195,6 +216,13 @@ export interface TrackedWalletRecord {
   firstUse: FirstUseRecord | null;
   firstTrade: FirstTradeRecord | null;
   lastCheckedAt: string | null;
+  totalDepositedUsdc: number;
+  depositCount: number;
+  firstDeposit: DepositRecord | null;
+  latestDeposit: DepositRecord | null;
+  positions: PositionRecord[];
+  totalBetUsd: number;
+  positionCount: number;
 }
 
 export interface FundingAlert {
@@ -240,7 +268,42 @@ export interface FirstTradeAlert {
   uniqueKey: string;
 }
 
-export type PendingMonitorAlert = FundingAlert | FirstUseAlert | FirstTradeAlert;
+export interface DepositAlert {
+  stage: "deposit";
+  wallet: string;
+  amountUsdc: number;
+  totalDepositedUsdc: number;
+  fundedUsd: number;
+  destination: string;
+  transactionHash: string;
+  blockNumber: number;
+  timestamp: number;
+  uniqueKey: string;
+}
+
+export interface PositionAlert {
+  stage: "position";
+  wallet: string;
+  title: string;
+  outcome: string;
+  side: string;
+  marketSlug: string;
+  usdSize: number;
+  totalBetUsd: number;
+  fundedUsd: number;
+  totalDepositedUsdc: number;
+  transactionHash: string;
+  blockNumber: number | null;
+  timestamp: number;
+  uniqueKey: string;
+}
+
+export type PendingMonitorAlert =
+  | FundingAlert
+  | FirstUseAlert
+  | FirstTradeAlert
+  | DepositAlert
+  | PositionAlert;
 
 export interface PublishedAlertFields {
   message: string;
@@ -272,6 +335,9 @@ export interface MonitorStats {
   trackedWalletCount: number;
   firstUseCount: number;
   firstTradeCount: number;
+  depositCount: number;
+  activeCount: number;
+  depletedCount: number;
   recentAlertCount: number;
   lastAlertAt: string | null;
 }
@@ -354,6 +420,11 @@ export interface PolygonClientLike {
     toBlock: number;
     address: string;
   }): Promise<DecodedApprovalForAllLog[]>;
+  getUsdcTransfersToAddresses(input: {
+    fromBlock: number;
+    toBlock: number;
+    destinations: string[];
+  }): Promise<DecodedTransferLog[]>;
 }
 
 export interface PolymarketDataClientLike {
@@ -390,6 +461,9 @@ export interface MonitorStateStoreLike {
     trackedWalletCount: number;
     firstUseCount: number;
     firstTradeCount: number;
+    depositCount: number;
+    activeCount: number;
+    depletedCount: number;
   };
   recordMonitorSync(status: ChainSyncStatus): void;
   getMonitorStatus(): MonitorStatusState;

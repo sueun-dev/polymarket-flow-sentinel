@@ -16,9 +16,17 @@ import {
   sortByBlockAndIndex,
   toIsoFromUnix
 } from "./shared.js";
-import type { FundingRegistrationResult, MonitorStageContext, MonitorStageDependencies } from "./shared.js";
+import type {
+  FundingRegistrationResult,
+  MonitorStageContext,
+  MonitorStageDependencies
+} from "./shared.js";
 
-function buildTrackedWalletRecord(wallet: string, funding: FundingRecord, walletKind: WalletKind): TrackedWalletRecord {
+function buildTrackedWalletRecord(
+  wallet: string,
+  funding: FundingRecord,
+  walletKind: WalletKind
+): TrackedWalletRecord {
   return {
     wallet,
     walletKind,
@@ -29,7 +37,14 @@ function buildTrackedWalletRecord(wallet: string, funding: FundingRecord, wallet
     latestFunding: funding,
     firstUse: null,
     firstTrade: null,
-    lastCheckedAt: null
+    lastCheckedAt: null,
+    totalDepositedUsdc: 0,
+    depositCount: 0,
+    firstDeposit: null,
+    latestDeposit: null,
+    positions: [],
+    totalBetUsd: 0,
+    positionCount: 0
   };
 }
 
@@ -59,9 +74,13 @@ async function registerFunding(
   const existing = dependencies.stateStore.getTrackedWallet(wallet);
 
   if (!existing) {
-    const canonicalProfileWallet = await dependencies.polymarketClient.getCanonicalProfileWallet(wallet);
+    const canonicalProfileWallet =
+      await dependencies.polymarketClient.getCanonicalProfileWallet(wallet);
 
-    if (canonicalProfileWallet && normalizeAddress(canonicalProfileWallet) !== normalizeAddress(wallet)) {
+    if (
+      canonicalProfileWallet &&
+      normalizeAddress(canonicalProfileWallet) !== normalizeAddress(wallet)
+    ) {
       return { tracked: false, alert: null };
     }
 
@@ -158,7 +177,10 @@ async function collectFundingTransfers(
     }
 
     if (asset.priceKind === "native") {
-      const nativeTransfers = await context.polygonClient.getNativeTransfers({ fromBlock, toBlock });
+      const nativeTransfers = await context.polygonClient.getNativeTransfers({
+        fromBlock,
+        toBlock
+      });
 
       for (const transfer of nativeTransfers) {
         transfers.push({
@@ -227,7 +249,10 @@ export async function processFundingTransfers(
     if (result.tracked) {
       const existing = dependencies.stateStore.getTrackedWallet(transfer.to);
 
-      if (existing?.fundingCount === 1 && existing.firstFunding.transactionHash === transfer.transactionHash) {
+      if (
+        existing?.fundingCount === 1 &&
+        existing.firstFunding.transactionHash === transfer.transactionHash
+      ) {
         newTrackedWallets += 1;
       }
     }

@@ -1,0 +1,5 @@
+node_modules/
+output/
+.data/
+public/dashboard-client.js
+package-lock.json
