@@ -2,6 +2,7 @@ import { POLYGON_FUNDING_ASSETS } from "../polygon-funding-assets.js";
 
 import type {
   FundingRecord,
+  PendingFundingAccumulator,
   PricedFundingTransfer,
   PublishedMonitorAlert,
   TrackedWalletRecord,
@@ -25,12 +26,14 @@ import type {
 function buildTrackedWalletRecord(
   wallet: string,
   funding: FundingRecord,
-  walletKind: WalletKind
+  walletKind: WalletKind,
+  aliases: string[] = []
 ): TrackedWalletRecord {
   return {
     wallet,
     walletKind,
     status: "funded",
+    aliases,
     totalFundedUsd: funding.amountUsd,
     fundingCount: 1,
     firstFunding: funding,
@@ -77,28 +80,39 @@ async function registerFunding(
     const canonicalProfileWallet =
       await dependencies.polymarketClient.getCanonicalProfileWallet(wallet);
 
+    const aliases: string[] = [];
     if (
       canonicalProfileWallet &&
       normalizeAddress(canonicalProfileWallet) !== normalizeAddress(wallet)
     ) {
-      return { tracked: false, alert: null };
+      aliases.push(normalizeAddress(canonicalProfileWallet));
     }
 
-    const firstActivity = await dependencies.polymarketClient.getFirstActivity(wallet);
+    // Check activity on the funded wallet and all aliases
+    const walletsToCheck = [wallet, ...aliases];
+    let hasExistingActivity = false;
+    for (const addr of walletsToCheck) {
+      const firstActivity = await dependencies.polymarketClient.getFirstActivity(addr);
+      if (firstActivity && firstActivity.timestamp < fundingTimestamp) {
+        hasExistingActivity = true;
+        break;
+      }
+    }
 
-    if (firstActivity && firstActivity.timestamp < fundingTimestamp) {
+    if (hasExistingActivity) {
       return { tracked: false, alert: null };
     }
 
     const walletCode = await dependencies.polygonClient.getCode(wallet);
     const walletKind: WalletKind = isEmptyCode(walletCode) ? "EOA" : "Contract";
-    const record = buildTrackedWalletRecord(wallet, funding, walletKind);
+    const record = buildTrackedWalletRecord(wallet, funding, walletKind, aliases);
     dependencies.stateStore.upsertTrackedWallet(wallet, () => record);
 
     const alert = await dependencies.emitAlert({
       stage: "funding",
       wallet,
       walletKind,
+      aliases,
       assetSymbol: funding.assetSymbol,
       amountToken: funding.amountToken,
       amountUsd: funding.amountUsd,
@@ -141,6 +155,7 @@ async function registerFunding(
     stage: "funding",
     wallet,
     walletKind: updated.walletKind,
+    aliases: updated.aliases,
     assetSymbol: funding.assetSymbol,
     amountToken: funding.amountToken,
     amountUsd: funding.amountUsd,
@@ -225,16 +240,20 @@ export async function processFundingTransfers(
   const sameTransactionSenders = new Set(
     transfers.map((transfer) => `${transfer.transactionHash}:${normalizeAddress(transfer.from)}`)
   );
+
+  // Don't filter by minFundingUsd here — allow all non-self transfers through
+  // so we can accumulate sub-threshold transfers per wallet
   const candidateTransfers = transfers
     .filter(
       (transfer) =>
-        transfer.value >= dependencies.config.minFundingUsd &&
+        transfer.value > 0 &&
         !sameTransactionSenders.has(`${transfer.transactionHash}:${normalizeAddress(transfer.to)}`)
     )
     .sort(sortByBlockAndIndex);
 
   let newTrackedWallets = 0;
   const alerts: PublishedMonitorAlert[] = [];
+  const minFunding = dependencies.config.minFundingUsd;
 
   for (const transfer of candidateTransfers) {
     const transferKey = createFundingTransferKey(transfer);
@@ -244,21 +263,94 @@ export async function processFundingTransfers(
     }
 
     dependencies.stateStore.markFundingTransferSeen(transferKey);
-    const result = await registerFunding(dependencies, transfer);
 
-    if (result.tracked) {
-      const existing = dependencies.stateStore.getTrackedWallet(transfer.to);
+    const wallet = normalizeAddress(transfer.to);
+    const existingTracked = dependencies.stateStore.getTrackedWallet(wallet);
 
-      if (
-        existing?.fundingCount === 1 &&
-        existing.firstFunding.transactionHash === transfer.transactionHash
-      ) {
-        newTrackedWallets += 1;
+    // Already tracked — always register additional funding
+    if (existingTracked) {
+      const result = await registerFunding(dependencies, transfer);
+      if (result.alert) {
+        alerts.push(result.alert);
       }
+      continue;
     }
 
-    if (result.alert) {
-      alerts.push(result.alert);
+    // Single transfer meets threshold — register directly
+    if (transfer.value >= minFunding) {
+      const result = await registerFunding(dependencies, transfer);
+      if (result.tracked) {
+        const tracked = dependencies.stateStore.getTrackedWallet(wallet);
+        if (
+          tracked?.fundingCount === 1 &&
+          tracked.firstFunding.transactionHash === transfer.transactionHash
+        ) {
+          newTrackedWallets += 1;
+        }
+      }
+      if (result.alert) {
+        alerts.push(result.alert);
+      }
+      continue;
+    }
+
+    // Sub-threshold transfer — accumulate in pending funding
+    const fundingTimestamp = await dependencies.polygonClient.getBlockTimestamp(
+      transfer.blockNumber
+    );
+    const funding: FundingRecord = {
+      assetSymbol: transfer.assetSymbol,
+      assetAddress: transfer.assetAddress,
+      amountToken: transfer.amountToken,
+      amountUsd: transfer.value,
+      from: transfer.from,
+      transactionHash: transfer.transactionHash,
+      blockNumber: transfer.blockNumber,
+      logIndex: transfer.logIndex,
+      timestamp: fundingTimestamp,
+      timestampIso: toIsoFromUnix(fundingTimestamp)
+    };
+
+    const pending = dependencies.stateStore.getPendingFunding(wallet);
+    const accumulated: PendingFundingAccumulator = pending
+      ? {
+          wallet,
+          totalUsd: pending.totalUsd + transfer.value,
+          transferCount: pending.transferCount + 1,
+          firstSeenTimestamp: pending.firstSeenTimestamp,
+          latestTransfer: funding
+        }
+      : {
+          wallet,
+          totalUsd: transfer.value,
+          transferCount: 1,
+          firstSeenTimestamp: fundingTimestamp,
+          latestTransfer: funding
+        };
+
+    if (accumulated.totalUsd >= minFunding) {
+      // Cumulative funding crossed threshold — promote to tracked
+      dependencies.stateStore.removePendingFunding(wallet);
+
+      // Use the latest transfer to register (it's the one that crossed the threshold)
+      const result = await registerFunding(dependencies, transfer);
+      if (result.tracked) {
+        // Backfill the accumulated total
+        dependencies.stateStore.upsertTrackedWallet(wallet, (record) => {
+          if (!record) return null;
+          return {
+            ...record,
+            totalFundedUsd: accumulated.totalUsd,
+            fundingCount: accumulated.transferCount
+          };
+        });
+        newTrackedWallets += 1;
+      }
+      if (result.alert) {
+        alerts.push(result.alert);
+      }
+    } else {
+      dependencies.stateStore.upsertPendingFunding(wallet, accumulated);
     }
   }
 

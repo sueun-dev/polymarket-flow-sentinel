@@ -6,6 +6,7 @@ import { isRecord } from "./runtime-guards.js";
 import type {
   ChainSyncStatus,
   MonitorStatusState,
+  PendingFundingAccumulator,
   PersistedMonitorState,
   PublishedMonitorAlert,
   TrackedWalletRecord
@@ -17,6 +18,7 @@ const EMPTY_STATE: PersistedMonitorState = Object.freeze({
   seenFundingTransferKeys: [],
   sentEventKeys: [],
   trackedWallets: {},
+  pendingFunding: {},
   recentAlerts: [],
   monitorStatus: {
     lastChainSync: null
@@ -38,6 +40,9 @@ function sanitizeTrackedWallet(value: unknown): TrackedWalletRecord | null {
 
   const record = value as Record<string, unknown>;
 
+  if (!("aliases" in record) || !Array.isArray(record["aliases"])) {
+    record["aliases"] = [];
+  }
   if (!("totalDepositedUsdc" in record)) {
     record["totalDepositedUsdc"] = 0;
   }
@@ -151,6 +156,9 @@ export class JsonMonitorStateStore {
               .slice(-this.maxSentEventKeys)
           : [],
         trackedWallets: Object.fromEntries(trackedWalletEntries),
+        pendingFunding: sanitizeObjectRecord<PendingFundingAccumulator>(
+          parsedRecord["pendingFunding"]
+        ),
         recentAlerts,
         monitorStatus: sanitizeMonitorStatus(
           parsedRecord["monitorStatus"] ?? parsedRecord["trackerStatus"]
@@ -259,15 +267,20 @@ export class JsonMonitorStateStore {
 
     const wallets = Object.values(this.state.trackedWallets);
     if (wallets.length > this.maxTrackedWallets) {
-      const overflowWallets = wallets
+      const overflowCount = wallets.length - this.maxTrackedWallets;
+
+      // Only evict wallets that have completed their lifecycle (have a first trade)
+      // Wallets still in funded/first-use stages are protected from eviction
+      const evictable = wallets
+        .filter((w) => w.firstTrade !== null)
         .sort((left, right) => {
           const leftTimestamp = left.firstTrade?.timestamp ?? left.firstFunding.timestamp;
           const rightTimestamp = right.firstTrade?.timestamp ?? right.firstFunding.timestamp;
           return leftTimestamp - rightTimestamp;
-        })
-        .slice(0, wallets.length - this.maxTrackedWallets);
+        });
 
-      for (const record of overflowWallets) {
+      const toEvict = evictable.slice(0, overflowCount);
+      for (const record of toEvict) {
         delete this.state.trackedWallets[record.wallet.toLowerCase()];
       }
     }
@@ -279,6 +292,18 @@ export class JsonMonitorStateStore {
     return Object.values(this.state.trackedWallets).sort(
       (left, right) => right.firstFunding.timestamp - left.firstFunding.timestamp
     );
+  }
+
+  getPendingFunding(wallet: string): PendingFundingAccumulator | null {
+    return this.state.pendingFunding[wallet.toLowerCase()] ?? null;
+  }
+
+  upsertPendingFunding(wallet: string, accumulator: PendingFundingAccumulator): void {
+    this.state.pendingFunding[wallet.toLowerCase()] = accumulator;
+  }
+
+  removePendingFunding(wallet: string): void {
+    delete this.state.pendingFunding[wallet.toLowerCase()];
   }
 
   addRecentAlert(alert: PublishedMonitorAlert, maxRecentAlerts: number): void {
