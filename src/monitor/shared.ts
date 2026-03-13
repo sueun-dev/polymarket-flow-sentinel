@@ -49,7 +49,9 @@ export const IGNORED_WALLETS = new Set<string>([
 
 export const DEPOSIT_DESTINATIONS: string[] = [
   POLYMARKET_CONTRACTS.conditionalTokens.toLowerCase(),
-  POLYMARKET_CONTRACTS.negRiskAdapter.toLowerCase()
+  POLYMARKET_CONTRACTS.negRiskAdapter.toLowerCase(),
+  POLYMARKET_CONTRACTS.ctfExchange.toLowerCase(),
+  POLYMARKET_CONTRACTS.negRiskCtfExchange.toLowerCase()
 ];
 
 export function toIsoFromUnix(timestamp: number): string {
