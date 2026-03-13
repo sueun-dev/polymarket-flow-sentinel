@@ -18,14 +18,20 @@ export function formatUsd(amount: number): string {
 
 export function formatMonitorAlertMessage(alert: PendingMonitorAlert): string {
   if (alert.stage === "funding") {
-    return [
+    const lines = [
       `[FRESH WALLET FUNDED] ${formatUsd(alert.amountUsd)}`,
       `Wallet: ${shortWallet(alert.wallet)}`,
-      `Wallet type: ${alert.walletKind}`,
+      `Wallet type: ${alert.walletKind}`
+    ];
+    if (alert.aliases.length > 0) {
+      lines.push(`Aliases: ${alert.aliases.map(shortWallet).join(", ")}`);
+    }
+    lines.push(
       `Asset: ${alert.amountToken.toLocaleString()} ${alert.assetSymbol}`.trim(),
       `Source: ${shortWallet(alert.from)}`,
       `Tx: https://polygonscan.com/tx/${alert.transactionHash}`
-    ].join("\n");
+    );
+    return lines.join("\n");
   }
 
   if (alert.stage === "first-use") {

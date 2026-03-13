@@ -45,6 +45,7 @@ function createTestConfig(overrides: Partial<MonitorConfig> = {}): MonitorConfig
     maxSentEventKeys: 100,
     maxRecentAlerts: 20,
     requestTimeoutMs: 5_000,
+    refreshConcurrency: 5,
     stateFile: path.join(os.tmpdir(), `flow-sentinel-config-${process.pid}.json`),
     webhookUrl: "",
     bootstrapMode: "scan",
@@ -375,10 +376,10 @@ test("FundingLifecycleMonitor records funding, first use, and first trade", asyn
   await fs.unlink(filePath);
 });
 
-test("FundingLifecycleMonitor ignores owner addresses that resolve to a different Polymarket proxy wallet", async () => {
+test("FundingLifecycleMonitor tracks owner addresses that resolve to a different Polymarket proxy wallet as aliases", async () => {
   const filePath = path.join(
     os.tmpdir(),
-    `polymarket-flow-sentinel-owner-skip-${process.pid}-${Date.now()}.json`
+    `polymarket-flow-sentinel-owner-alias-${process.pid}-${Date.now()}.json`
   );
   const stateStore = new JsonMonitorStateStore(filePath, 100, 100, 100);
   const fundedOwnerWallet = "0x2222222222222222222222222222222222222222";
@@ -427,9 +428,11 @@ test("FundingLifecycleMonitor ignores owner addresses that resolve to a differen
   await monitor.initialize();
   const result = await monitor.runOnce();
 
-  assert.equal(result.alerts.length, 0);
-  assert.equal(result.newTrackedWallets, 0);
-  assert.equal(stateStore.getTrackedWallet(fundedOwnerWallet), null);
+  assert.equal(result.newTrackedWallets, 1);
+  const tracked = stateStore.getTrackedWallet(fundedOwnerWallet);
+  assert.ok(tracked);
+  assert.deepEqual(tracked.aliases, [proxyWallet]);
+  assert.equal(tracked.totalFundedUsd, 60_000);
 
   await fs.unlink(filePath);
 });

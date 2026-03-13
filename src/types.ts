@@ -27,6 +27,7 @@ export interface MonitorConfig {
   maxSentEventKeys: number;
   maxRecentAlerts: number;
   requestTimeoutMs: number;
+  refreshConcurrency: number;
   stateFile: string;
   webhookUrl: string;
   bootstrapMode: BootstrapMode;
@@ -209,6 +210,8 @@ export interface TrackedWalletRecord {
   wallet: string;
   walletKind: WalletKind;
   status: WalletStatus;
+  /** Related addresses (proxy, safe, owner) that belong to the same identity */
+  aliases: string[];
   totalFundedUsd: number;
   fundingCount: number;
   firstFunding: FundingRecord;
@@ -229,6 +232,7 @@ export interface FundingAlert {
   stage: "funding";
   wallet: string;
   walletKind: WalletKind;
+  aliases: string[];
   assetSymbol: string;
   amountToken: number;
   amountUsd: number;
@@ -388,12 +392,21 @@ export interface MonitorStatusState {
   lastChainSync: ChainSyncStatus | null;
 }
 
+export interface PendingFundingAccumulator {
+  wallet: string;
+  totalUsd: number;
+  transferCount: number;
+  firstSeenTimestamp: number;
+  latestTransfer: FundingRecord;
+}
+
 export interface PersistedMonitorState {
   bootstrapped: boolean;
   lastProcessedBlock: number | null;
   seenFundingTransferKeys: string[];
   sentEventKeys: string[];
   trackedWallets: Record<string, TrackedWalletRecord>;
+  pendingFunding: Record<string, PendingFundingAccumulator>;
   recentAlerts: PublishedMonitorAlert[];
   monitorStatus: MonitorStatusState;
 }
@@ -455,6 +468,9 @@ export interface MonitorStateStoreLike {
     updater: (currentValue: TrackedWalletRecord | null) => TrackedWalletRecord | null
   ): TrackedWalletRecord | null;
   listTrackedWallets(): TrackedWalletRecord[];
+  getPendingFunding(wallet: string): PendingFundingAccumulator | null;
+  upsertPendingFunding(wallet: string, accumulator: PendingFundingAccumulator): void;
+  removePendingFunding(wallet: string): void;
   addRecentAlert(alert: PublishedMonitorAlert, maxRecentAlerts: number): void;
   getRecentAlerts(limit?: number): PublishedMonitorAlert[];
   getTrackedWalletStats(): {
