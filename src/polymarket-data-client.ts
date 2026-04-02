@@ -9,7 +9,6 @@ import {
 import type { ActivityQuery, FetchLike, PolymarketActivityRow } from "./types.js";
 
 const GAMMA_API_BASE_URL = "https://gamma-api.polymarket.com";
-
 interface PolymarketDataClientOptions {
   baseUrl: string;
   timeoutMs: number;
@@ -155,7 +154,8 @@ export function getTradeUsdSize(
   if (
     typeof trade.size === "number" &&
     Number.isFinite(trade.size) &&
-    typeof trade.price === "number"
+    typeof trade.price === "number" &&
+    Number.isFinite(trade.price)
   ) {
     return trade.size * trade.price;
   }
