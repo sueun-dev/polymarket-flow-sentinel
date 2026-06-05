@@ -55,16 +55,13 @@ async function serveStatic(
   try {
     const body = await fs.readFile(resolvedPath);
     const contentType = CONTENT_TYPES[path.extname(resolvedPath)] ?? "application/octet-stream";
-    const cachePath =
-      requestPath === "/"
-        ? "/index.html"
-        : requestPath === "/favicon.ico"
-          ? "/favicon.svg"
-          : requestPath;
+    // resolvePublicAssetPath already maps "/" to index.html, so derive the cache
+    // directive from the file actually being served instead of re-mapping here.
+    const isIndexHtml = path.relative(publicDir, resolvedPath) === "index.html";
 
     response.writeHead(200, {
       "content-type": contentType,
-      "cache-control": cachePath === "/index.html" ? "no-cache" : "public, max-age=60"
+      "cache-control": isIndexHtml ? "no-cache" : "public, max-age=60"
     });
     response.end(headOnly ? undefined : body);
   } catch (error: unknown) {

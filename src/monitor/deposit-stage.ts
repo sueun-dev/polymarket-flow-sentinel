@@ -10,6 +10,25 @@ import {
 } from "./shared.js";
 import type { MonitorStageDependencies } from "./shared.js";
 
+/**
+ * Treat a USDC.e deposit as the wallet's initial funding record. Deposits are
+ * the primary entry point, so the deposited amount doubles as the seed funding.
+ */
+function depositToFundingRecord(deposit: DepositRecord, wallet: string): FundingRecord {
+  return {
+    assetSymbol: "USDC.e",
+    assetAddress: DEPOSIT_DESTINATIONS[0]!,
+    amountToken: deposit.amountUsdc,
+    amountUsd: deposit.amountUsdc,
+    from: wallet,
+    transactionHash: deposit.transactionHash,
+    blockNumber: deposit.blockNumber,
+    logIndex: deposit.logIndex,
+    timestamp: deposit.timestamp,
+    timestampIso: deposit.timestampIso
+  };
+}
+
 export async function processDepositSignals(
   dependencies: MonitorStageDependencies,
   fromBlock: number,
@@ -68,18 +87,7 @@ export async function processDepositSignals(
           totalUsd: runningTotal,
           transferCount: (pending?.transferCount ?? 0) + 1,
           firstSeenTimestamp: pending?.firstSeenTimestamp ?? timestamp,
-          latestTransfer: {
-            assetSymbol: "USDC.e",
-            assetAddress: DEPOSIT_DESTINATIONS[0]!,
-            amountToken: deposit.amountUsdc,
-            amountUsd: deposit.amountUsdc,
-            from: wallet,
-            transactionHash: deposit.transactionHash,
-            blockNumber: deposit.blockNumber,
-            logIndex: deposit.logIndex,
-            timestamp,
-            timestampIso: toIsoFromUnix(timestamp)
-          }
+          latestTransfer: depositToFundingRecord(deposit, wallet)
         });
         continue;
       }
@@ -107,18 +115,7 @@ export async function processDepositSignals(
       }
 
       // Use the deposit as the initial "funding" record
-      const initialFunding: FundingRecord = {
-        assetSymbol: "USDC.e",
-        assetAddress: DEPOSIT_DESTINATIONS[0]!,
-        amountToken: deposit.amountUsdc,
-        amountUsd: deposit.amountUsdc,
-        from: wallet,
-        transactionHash: deposit.transactionHash,
-        blockNumber: deposit.blockNumber,
-        logIndex: deposit.logIndex,
-        timestamp: deposit.timestamp,
-        timestampIso: deposit.timestampIso
-      };
+      const initialFunding = depositToFundingRecord(deposit, wallet);
 
       dependencies.stateStore.upsertTrackedWallet(wallet, () => ({
         wallet,

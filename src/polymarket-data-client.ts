@@ -36,33 +36,11 @@ function buildUrl(
   return url;
 }
 
-async function fetchJson(url: URL, timeoutMs: number, fetchImpl: FetchLike): Promise<unknown> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-
-  try {
-    const response = await fetchImpl(url, {
-      signal: controller.signal,
-      headers: {
-        accept: "application/json",
-        "user-agent": "polymarket-flow-sentinel/1.0.0"
-      }
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status} for ${url.toString()}`);
-    }
-
-    return (await response.json()) as unknown;
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-async function fetchOptionalJson(
+async function requestJson(
   url: URL,
   timeoutMs: number,
-  fetchImpl: FetchLike
+  fetchImpl: FetchLike,
+  { treat404AsNull = false }: { treat404AsNull?: boolean } = {}
 ): Promise<unknown | null> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -76,7 +54,7 @@ async function fetchOptionalJson(
       }
     });
 
-    if (response.status === 404) {
+    if (treat404AsNull && response.status === 404) {
       return null;
     }
 
@@ -88,6 +66,18 @@ async function fetchOptionalJson(
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function fetchJson(url: URL, timeoutMs: number, fetchImpl: FetchLike): Promise<unknown> {
+  return requestJson(url, timeoutMs, fetchImpl);
+}
+
+function fetchOptionalJson(
+  url: URL,
+  timeoutMs: number,
+  fetchImpl: FetchLike
+): Promise<unknown | null> {
+  return requestJson(url, timeoutMs, fetchImpl, { treat404AsNull: true });
 }
 
 function parseActivityRow(value: unknown, index: number): PolymarketActivityRow {
