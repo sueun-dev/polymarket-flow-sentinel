@@ -37,6 +37,7 @@ function createTestConfig(overrides: Partial<MonitorConfig> = {}): MonitorConfig
     minTradeUsd: 0,
     pollIntervalMs: 1_000,
     startupLookbackBlocks: 50,
+    confirmationBlocks: 0,
     blockBatchSize: 10,
     activityPageSize: 500,
     activityPageCount: 10,

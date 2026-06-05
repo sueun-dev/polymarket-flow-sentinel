@@ -19,6 +19,7 @@ export interface MonitorConfig {
   minTradeUsd: number;
   pollIntervalMs: number;
   startupLookbackBlocks: number;
+  confirmationBlocks: number;
   blockBatchSize: number;
   activityPageSize: number;
   activityPageCount: number;
