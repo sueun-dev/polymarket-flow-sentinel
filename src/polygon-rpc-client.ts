@@ -65,7 +65,24 @@ function addressTopic(address: string): string {
 }
 
 function formatUnits(rawValue: bigint, decimals: number): number {
-  return Number(rawValue) / 10 ** decimals;
+  if (decimals <= 0) {
+    return Number(rawValue);
+  }
+
+  // Split into integer and fractional parts using BigInt arithmetic so the
+  // BigInt -> Number narrowing happens AFTER scaling. Converting the raw value
+  // to Number before dividing loses precision for high-decimal tokens (e.g.
+  // 18-decimal WETH/POL), because a whale-sized amount such as 50_000 * 10**18
+  // far exceeds Number.MAX_SAFE_INTEGER and gets rounded.
+  const negative = rawValue < 0n;
+  const absoluteValue = negative ? -rawValue : rawValue;
+  const divisor = 10n ** BigInt(decimals);
+  const integerPart = absoluteValue / divisor;
+  const fractionalPart = absoluteValue % divisor;
+  const fractionAsDecimal = Number(fractionalPart) / Number(divisor);
+  const magnitude = Number(integerPart) + fractionAsDecimal;
+
+  return negative ? -magnitude : magnitude;
 }
 
 function decodeBoolean(value: string | undefined): boolean {

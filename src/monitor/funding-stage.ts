@@ -159,6 +159,20 @@ export async function processFundingTransfers(
   toBlock: number
 ): Promise<{ alerts: PublishedMonitorAlert[] }> {
   const transfers = await collectFundingTransfers(dependencies, fromBlock, toBlock);
+  // Pass-through heuristic: drop an inbound transfer when the same recipient also
+  // SENT a transfer in the same transaction (A -> wallet -> B forwarding), so we
+  // don't count funds that merely flow through a relay address.
+  //
+  // Known limitations (documented, intentionally not "fixed" here to avoid
+  // changing behavior without value/netting logic):
+  //   * It is built from the CURRENT batch only, so a forward whose outbound leg
+  //     lands in a different block batch is not detected (multi-hop across
+  //     batches is missed).
+  //   * It compares only (txHash, address), ignoring amounts, so a genuinely
+  //     funded wallet that also makes any unrelated outbound transfer in the
+  //     same transaction is excluded wholesale.
+  // This stage only enriches already-tracked wallets' totalFundedUsd; the
+  // primary deposit/first-bet figures are produced by deposit-stage.
   const sameTransactionSenders = new Set(
     transfers.map((transfer) => `${transfer.transactionHash}:${normalizeAddress(transfer.from)}`)
   );
