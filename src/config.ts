@@ -10,6 +10,11 @@ const DEFAULTS: Omit<MonitorConfig, "once"> = {
   minTradeUsd: 0,
   pollIntervalMs: 5_000,
   startupLookbackBlocks: 256,
+  // Treat the most recent N blocks as unconfirmed and do not process them yet.
+  // Polygon can reorg shallow tip blocks; advancing the cursor onto the chain
+  // head (eth_blockNumber) records logs from blocks that may be orphaned and
+  // never re-scans them. A small lag lets the tip settle before we commit.
+  confirmationBlocks: 12,
   blockBatchSize: 20,
   activityPageSize: 500,
   activityPageCount: 10,
@@ -75,6 +80,9 @@ export function loadConfig(argv: string[] = process.argv.slice(2)): MonitorConfi
       "POLYMARKET_STARTUP_LOOKBACK_BLOCKS",
       DEFAULTS.startupLookbackBlocks
     ),
+    confirmationBlocks: readNumber("POLYMARKET_CONFIRMATION_BLOCKS", DEFAULTS.confirmationBlocks, {
+      allowZero: true
+    }),
     blockBatchSize: readNumber("POLYMARKET_BLOCK_BATCH_SIZE", DEFAULTS.blockBatchSize),
     activityPageSize: readNumber("POLYMARKET_ACTIVITY_PAGE_SIZE", DEFAULTS.activityPageSize),
     activityPageCount: readNumber("POLYMARKET_ACTIVITY_PAGE_COUNT", DEFAULTS.activityPageCount),

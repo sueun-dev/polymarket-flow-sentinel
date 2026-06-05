@@ -182,6 +182,7 @@ PORT=3000
 
 - Polymarket 공개 activity API와 Polygon RPC를 함께 사용합니다.
 - 첫 사용 신호는 Polymarket 공식 배포 주소에 대한 승인 이벤트와 wallet-specific activity를 같이 봅니다.
-- 같은 트랜잭션 안에서 중간 계약으로 바로 흘러가는 pass-through transfer는 funding 후보에서 제외합니다.
+- 같은 트랜잭션 안에서 중간 계약으로 바로 흘러가는 pass-through transfer는 funding 후보에서 제외합니다. (단, 같은 배치 안에서만 탐지하며 금액은 비교하지 않습니다.)
 - 변동성 자산은 외부 가격 API로 USD 환산합니다.
+- 입금 탐지는 Polymarket 컨트랙트로 **직접** 전송된 ERC-20 USDC `Transfer`만 보고 `from`을 입금자로 간주합니다. 따라서 proxy/relayer를 거치는 gasless 입금은 놓치거나 relay 주소를 입금자로 잘못 귀속할 수 있습니다 (알려진 한계). 트레이드 매칭을 위해 공개 프로필의 proxy 지갑은 alias로 추가합니다.
 - state를 유지한 채 계속 실행하면 단순 최근 거래창 감시보다 훨씬 안정적으로 funding-to-bet 흐름을 잡을 수 있습니다.

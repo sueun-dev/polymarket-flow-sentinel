@@ -15,6 +15,15 @@ export async function processDepositSignals(
   fromBlock: number,
   toBlock: number
 ): Promise<{ newTrackedWallets: number; alerts: PublishedMonitorAlert[] }> {
+  // Deposit detection looks only at DIRECT ERC-20 USDC `Transfer` logs whose
+  // `to` is a Polymarket contract, treating `from` as the depositor.
+  //
+  // Known limitation (architectural; deliberately not partially implemented):
+  // deposits routed through a proxy/relayer or gasless meta-transaction do not
+  // surface as a direct USDC transfer from the end user, so they are either
+  // missed or attributed to the relay/proxy address rather than the owner. The
+  // canonical profile lookup below records the proxy as an alias for trade
+  // matching, but it does not re-attribute the deposit itself.
   const transfers = await dependencies.polygonClient.getUsdcTransfersToAddresses({
     fromBlock,
     toBlock,
@@ -75,7 +84,14 @@ export async function processDepositSignals(
         continue;
       }
 
-      // Threshold crossed — remove pending and register
+      // Threshold crossed — carry the accumulated prior sub-threshold deposits
+      // forward before clearing the pending accumulator. These prior deposits
+      // are real money already sent to Polymarket contracts; dropping them would
+      // understate totalDepositedUsdc (and the depleted-status calculation that
+      // depends on it). The current deposit is added by the upsert below, so the
+      // seed only carries the PRIOR total/count (excluding the current transfer).
+      const priorDepositedUsdc = pending?.totalUsd ?? 0;
+      const priorDepositCount = pending?.transferCount ?? 0;
       dependencies.stateStore.removePendingFunding(wallet);
       const walletCode = await dependencies.polygonClient.getCode(wallet);
       const walletKind: WalletKind = isEmptyCode(walletCode) ? "EOA" : "Contract";
@@ -116,8 +132,8 @@ export async function processDepositSignals(
         firstUse: null,
         firstTrade: null,
         lastCheckedAt: null,
-        totalDepositedUsdc: 0,
-        depositCount: 0,
+        totalDepositedUsdc: priorDepositedUsdc,
+        depositCount: priorDepositCount,
         firstDeposit: null,
         latestDeposit: null,
         positions: [],

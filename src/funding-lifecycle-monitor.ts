@@ -102,25 +102,30 @@ export class FundingLifecycleMonitor {
     const latestBlock = await this.polygonClient.getBlockNumber();
     const previousBlock = this.stateStore.getLastProcessedBlock();
 
+    // Only treat blocks at least `confirmationBlocks` deep as final. Polygon can
+    // reorg shallow tip blocks; processing up to the unconfirmed chain head would
+    // record logs from blocks that may later be orphaned and never re-scan them.
+    const confirmedBlock = Math.max(0, latestBlock - this.config.confirmationBlocks);
+
     if (previousBlock === null && this.config.bootstrapMode === "skip") {
-      this.stateStore.setLastProcessedBlock(latestBlock);
+      this.stateStore.setLastProcessedBlock(confirmedBlock);
       this.stateStore.setBootstrapped(true);
       this.stateStore.recordMonitorSync({
         latestBlock,
-        lastProcessedBlock: latestBlock,
-        lagBlocks: 0,
+        lastProcessedBlock: confirmedBlock,
+        lagBlocks: Math.max(0, latestBlock - confirmedBlock),
         checkedAt: new Date().toISOString(),
         bootstrapped: true
       });
       await this.stateStore.save();
       this.logger.info(
-        `Bootstrapped at Polygon block ${latestBlock}. New funding alerts start on the next poll.`
+        `Bootstrapped at Polygon block ${confirmedBlock}. New funding alerts start on the next poll.`
       );
       return {
         alerts: [],
         bootstrapped: true,
         latestBlock,
-        lastProcessedBlock: latestBlock,
+        lastProcessedBlock: confirmedBlock,
         processedBlocks: 0,
         newTrackedWallets: 0,
         checkedWallets: 0
@@ -130,15 +135,15 @@ export class FundingLifecycleMonitor {
     const stageDependencies = this.getStageDependencies();
     let nextBlock =
       previousBlock === null
-        ? Math.max(0, latestBlock - this.config.startupLookbackBlocks + 1)
+        ? Math.max(0, confirmedBlock - this.config.startupLookbackBlocks + 1)
         : previousBlock + 1;
 
     let processedBlocks = 0;
     const alerts: PublishedMonitorAlert[] = [];
     let newTrackedWallets = 0;
 
-    while (nextBlock <= latestBlock) {
-      const toBlock = Math.min(nextBlock + this.config.blockBatchSize - 1, latestBlock);
+    while (nextBlock <= confirmedBlock) {
+      const toBlock = Math.min(nextBlock + this.config.blockBatchSize - 1, confirmedBlock);
       // Deposit stage runs FIRST — it's the primary entry point that registers
       // wallets actually depositing into Polymarket contracts
       const depositResult = await processDepositSignals(stageDependencies, nextBlock, toBlock);
